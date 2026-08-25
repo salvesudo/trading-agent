@@ -21,11 +21,11 @@ need them without placing anything.
 
 **Live-verified (2026-08-25):** the owner ran the full daily login flow
 (`app/broker/callback_server.py`) against the real FYERS API from their own
-EC2 instance — login, 2FA, redirect capture, code exchange, and a real
-`profile()` call all succeeded end-to-end. Quotes, order placement/modify/
-cancel, and both WebSocket clients remain unverified against live FYERS
-endpoints; this confirms the auth path and REST plumbing, not the rest of
-`app/broker/`.
+EC2 instance — login, 2FA, redirect capture, code exchange, and real
+`profile()`, `quotes()`, and `funds()` calls all succeeded end-to-end
+(`Quote` field mapping confirmed correct against a live response). Order
+placement/modify/cancel and both WebSocket clients remain unverified
+against live FYERS endpoints.
 
 ## What this environment can and can't do
 
