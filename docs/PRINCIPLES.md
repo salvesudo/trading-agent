@@ -215,7 +215,21 @@ inherits only whatever confidence its own directional tests provide (see
 another implementation or a live chart. Treat it as the least-trusted
 piece of this phase until someone does that comparison.
 
-## 17. Everything here is defense in depth
+## 17. Regime thresholds are starting points, not calibrated (Phase 7)
+
+`app/regime/detector.py` classifies trend via a fixed ADX threshold (25)
+and volatility via percentile rank in recent history (33rd/67th cutoffs).
+The percentile approach is deliberately instrument-relative -- a fixed
+absolute volatility cutoff would silently misclassify whichever
+instruments it wasn't tuned for, since "high volatility" means something
+different for a ₹50 stock than for NIFTY. But the specific numbers (25,
+33, 67) are still just defensible starting points, the same as
+`docs/ACCEPTANCE_CRITERIA.md`'s numbers: nobody has calibrated them
+against actual trading outcomes for the instruments this will trade.
+Revisit them once Phase 9 (strategy engine) or Phase 12 (backtesting)
+produces real evidence one way or the other.
+
+## 18. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

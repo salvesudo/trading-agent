@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 6 — Technical Analysis Engine
+## Status: Phase 7 — Market Regime Detection
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -123,6 +123,28 @@ uptrend, above price in a clear downtrend) — since it's hand-rolled rather
 than from an established library, spot-check its actual values before
 trusting it in a strategy.
 
+Phase 7 adds `app/regime/detector.py`: classifies recent price action
+into a trend state (`TRENDING_UP` / `TRENDING_DOWN` / `RANGING`, from
+ADX + directional index) and a volatility state (`LOW` / `NORMAL` /
+`HIGH`), built entirely on Phase 6's indicators. Volatility is classified
+by **percentile rank within its own recent history**, not a fixed
+absolute cutoff — "high volatility" means something different for a ₹50
+stock than for NIFTY, so a hardcoded threshold would misclassify
+whichever instruments it wasn't tuned for. The ADX trend threshold (25)
+and volatility percentile cutoffs (33rd/67th) are defensible starting
+points, not calibrated against real trading outcomes — treat them like
+`docs/ACCEPTANCE_CRITERIA.md`'s numbers: provisional until reviewed.
+
+12 new tests (126 total). One caught a real subtlety worth flagging: the
+`ta` library's `AverageTrueRange` leaves its warm-up period as literal
+`0.0`, not `NaN` — checked against the installed source before writing
+this, not assumed. Left uncorrected, those fake "zero volatility" entries
+would have inflated every real reading's percentile rank (extra entries
+that always count as "below," pushing genuinely normal volatility toward
+a false HIGH classification). `detect_regime` excludes them from the
+distribution; a test computes both the buggy and correct percentile from
+the same data and confirms the code matches the correct one.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -146,8 +168,8 @@ network access** and **no FYERS credentials**. That means:
 3. **Compliance checks (static IP, 2FA, permissions)** ✅
 4. **Market data service** ✅
 5. **Database (PostgreSQL schema)** ✅
-6. **Technical analysis engine** ← you are here
-7. Market regime detection
+6. **Technical analysis engine** ✅
+7. **Market regime detection** ← you are here
 8. News/sentiment engine
 9. Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)
 10. Risk engine ← skeleton included now, since it has veto power over every
@@ -231,6 +253,13 @@ print(service.store.latest_quote("NSE:RELIANCE-EQ"))
 print(service.store.candles("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE))
 ```
 
+`seed_history` (a real REST call to FYERS' `/history` endpoint) is
+live-verified — see the Phase 4 status note above. `start_streaming` (a
+real WebSocket connection) has **not** been exercised against a live tick
+stream yet — only against fakes in the test suite. The WS message parsing
+in particular is defensive by design (drops anything it doesn't recognize
+rather than raising) because of that.
+
 ## Database (Phase 5, needs a real Postgres — or SQLite for local dev)
 
 ```bash
@@ -283,8 +312,18 @@ broker/DB dependency. EMA/RSI/MACD/ATR/ADX/Bollinger Bands come from the
 `ta` library; Supertrend is hand-rolled and, unlike the rest, has not
 been cross-checked against another reference implementation.
 
-Neither `seed_history` (a real REST call to FYERS' `/history` endpoint)
-nor `start_streaming` (a real WebSocket connection) has been exercised
-against live FYERS endpoints yet — only against fakes in the test suite.
-The WS message parsing in particular is defensive by design (drops
-anything it doesn't recognize rather than raising) because of that.
+## Market regime (Phase 7)
+
+```python
+from app.regime.detector import detect_regime
+
+snapshot = detect_regime(candles)  # same candles as above
+print(snapshot.trend, snapshot.volatility)
+print(f"ADX={snapshot.adx:.1f} +DI={snapshot.plus_di:.1f} -DI={snapshot.minus_di:.1f}")
+print(f"ATR%={snapshot.atr_pct:.2f} (percentile {snapshot.atr_pct_percentile:.0f})")
+```
+
+Trend threshold (ADX ≥ 25) and volatility percentile cutoffs (33rd/67th)
+are defensible starting points, not calibrated against real trading
+outcomes for the instruments this will actually trade — see
+`docs/PRINCIPLES.md` section 17.
