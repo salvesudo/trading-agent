@@ -180,7 +180,26 @@ cumulative field, every candle would report the full day's volume
 instead of its own, and nothing about that would look obviously wrong
 in a quick glance at the numbers.
 
-## 15. Everything here is defense in depth
+## 15. The database exists; the agent loop doesn't read from it yet (Phase 5)
+
+`app/db/repository.py` can load and save `AccountState`, but nothing
+calls `load_account_state` automatically before a Risk Engine evaluation
+-- `app/agent.py` still constructs `AccountState()` with its Phase-1
+defaults unless a caller explicitly wires a DB-backed one in. That's
+deliberate, not an oversight: "today's realized P&L" and "consecutive
+losses" only mean something once there's an actual persistent trading
+loop accumulating them across multiple trades in a day, which doesn't
+exist until Phase 11 (paper trading engine). Wiring the Risk Engine to
+silently read stale or empty DB state before that would be worse than
+the current explicit placeholder.
+
+SQLite works against every model in `app/db/models.py` for local dev and
+tests (see `app/db/base.py`), but Postgres is the intended production
+database -- don't assume SQLite-specific behavior (or lack thereof, see
+`app/db/repository.py::_as_utc`) generalizes; test anything dialect-
+sensitive against both before trusting it in production.
+
+## 16. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

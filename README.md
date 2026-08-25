@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 4 — Market Data Service
+## Status: Phase 5 — Database (PostgreSQL Schema)
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -73,6 +73,34 @@ confirmed working end-to-end. `start_streaming()` (the live WebSocket tick
 path, and the volume-diffing in `candle_builder.py` operating on real
 cumulative-volume ticks) remains unverified against live FYERS endpoints.
 
+Phase 5 adds `app/db/`: SQLAlchemy models (`account_state`,
+`risk_evaluations`, `compliance_checks`, `candles`) and a repository layer
+(`app/db/repository.py`) that's the only place translating between ORM
+rows and the dataclasses the rest of the app already uses and tests
+(`AccountState`, `ComplianceReport`, `Candle`). Postgres is the intended
+production database; a `sqlite:///` URL also works against the same
+models for local dev/tests (every column type is dialect-generic).
+Migrations live in `migrations/` (Alembic), reading `DATABASE_URL` from
+the same `.env`/`settings` source of truth as everything else — the
+initial migration was generated and verified (upgrade **and** downgrade)
+against a throwaway local SQLite database, since there's no live Postgres
+reachable from this environment.
+
+Repository functions exist and are tested (28 new tests, using in-memory
+SQLite), but are **not wired into the live agent loop or compliance_check
+script yet** — `AccountState` in the Risk Engine still uses its Phase-1
+defaults unless a caller explicitly loads from DB. That wiring belongs to
+Phase 11 (paper trading engine), once there's an actual persistent trading
+loop for "today's realized P&L" and "consecutive losses" to accumulate
+across, rather than one-off CLI evaluations. This phase also caught and
+fixed a real bug: SQLite's `DateTime(timezone=True)` doesn't actually
+preserve `tzinfo` across a round trip (unlike Postgres) — candle
+timestamps read back from a SQLite-backed session came back naive, which
+silently broke both equality comparisons and duplicate-detection on
+re-seeding. `app/db/repository.py` now normalizes every timestamp read
+back from the DB to UTC-aware, a no-op for Postgres and a real fix for
+SQLite.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -94,8 +122,8 @@ network access** and **no FYERS credentials**. That means:
 1. **Project foundation** ✅
 2. **FYERS API v3 integration (auth, order, quotes, WS)** ✅
 3. **Compliance checks (static IP, 2FA, permissions)** ✅
-4. **Market data service** ← you are here
-5. Database (PostgreSQL schema)
+4. **Market data service** ✅
+5. **Database (PostgreSQL schema)** ← you are here
 6. Technical analysis engine
 7. Market regime detection
 8. News/sentiment engine
@@ -180,6 +208,35 @@ service.track("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE)
 print(service.store.latest_quote("NSE:RELIANCE-EQ"))
 print(service.store.candles("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE))
 ```
+
+## Database (Phase 5, needs a real Postgres — or SQLite for local dev)
+
+```bash
+# DATABASE_URL in .env: postgresql://user:pass@host:5432/dbname for real
+# use, or sqlite:///./dev.db to try this out without a Postgres server.
+python -m alembic upgrade head   # creates every table via migrations/
+```
+
+```python
+from datetime import date
+
+from app.db.base import build_sessionmaker
+from app.db import repository
+from app.risk.risk_engine import AccountState
+
+Session = build_sessionmaker()
+with Session() as session:
+    repository.save_account_state(session, AccountState(consecutive_losses=1), trade_date=date.today())
+    session.commit()
+    print(repository.load_account_state(session, trade_date=date.today()))
+```
+
+Not wired into the live agent loop yet — see the Phase 5 note above.
+`python -m alembic upgrade head` has been verified (upgrade **and**
+downgrade) against a throwaway local SQLite database from this
+environment; it has **not** been run against a real Postgres server —
+that needs your own Postgres instance (local, Docker, or on the EC2 box)
+with `DATABASE_URL` pointed at it.
 
 Neither `seed_history` (a real REST call to FYERS' `/history` endpoint)
 nor `start_streaming` (a real WebSocket connection) has been exercised
