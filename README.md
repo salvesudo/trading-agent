@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 8 — News/Sentiment Engine
+## Status: Phase 9 — Strategy Engine
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -169,6 +169,44 @@ not a claim of accuracy).
 feed's real, confirmed structure (CDATA usage, RFC-822 dates) rather
 than invented XML shapes.
 
+Phase 9 adds `app/strategy/`: six strategies (trend-following, momentum,
+mean-reversion, breakout, VWAP, news), each a pure function of a
+`StrategyContext` (candles + regime + pre-filtered news) built entirely
+on Phases 4/6/7/8. `app/analysis/indicators.py` gained a session-aware
+VWAP (resets each trading day in IST — `ta` has no VWAP at all) since the
+VWAP strategy needed it. Every strategy returns a `StrategySignal`, never
+places an order, and never bypasses the Risk Engine — converting a signal
+into an actual `TradeCandidate` (`app/strategy/candidate.py`) is a
+separate, explicit step, same reason `app/broker/models.OrderRequest`
+isn't the same shape as `TradeCandidate` either. `StrategyEngine.
+generate_signals()` runs all six and collects whatever fires;
+`select_best_signal()` is a simple confidence-based placeholder, not a
+claim of real arbitration — that's likely Phase 13's job.
+
+None of the six strategies' specific rules (ADX/EMA/Supertrend gates,
+RSI/MACD crossings, Bollinger squeeze thresholds, VWAP pullback
+tolerance, news sentiment cutoffs) have been backtested or calibrated —
+they're explicit, documented starting rules, same honesty standard as
+Phase 7's regime thresholds (see `docs/PRINCIPLES.md`).
+
+39 new tests (197 total). Exact trigger conditions for RSI/MACD crossings,
+Bollinger squeezes, and VWAP pullbacks were found by iterating against
+the real indicator code with a script, not by writing synthetic data and
+hoping it happened to trigger the right branch — the same discipline
+applied to verifying the FYERS SDK and `ta` library elsewhere in this
+project, just applied to this project's own code instead of a
+third-party one.
+
+**Live-verified (2026-08-25) — the first full end-to-end pipeline run,
+from this environment:** real live news (Phase 8) + synthetic candles in
+a clear uptrend (this environment has no FYERS credentials for real
+candles) were assembled into a `StrategyContext`, run through all six
+strategies (`TREND_FOLLOWING` fired), converted to a `TradeCandidate`,
+and evaluated by the real `RiskEngine` — result: `APPROVE, qty=5,
+max_loss=₹45.00 (0.90% of equity)`. This confirms Phases 1, 4, 6, 7, 8,
+and 9 genuinely compose, not just that each passes its own tests in
+isolation.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -194,8 +232,8 @@ network access** and **no FYERS credentials**. That means:
 5. **Database (PostgreSQL schema)** ✅
 6. **Technical analysis engine** ✅
 7. **Market regime detection** ✅
-8. **News/sentiment engine** ← you are here
-9. Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)
+8. **News/sentiment engine** ✅
+9. **Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)** ← you are here
 10. Risk engine ← skeleton included now, since it has veto power over every
     later phase and everything else must be built to respect it
 11. Paper trading engine
@@ -370,3 +408,36 @@ EC2 setup to verify, since these are public feeds. Sentiment is a simple
 keyword-count heuristic (`app/news/sentiment.py`), not an ML model or an
 LLM — expect it to be noisy; it's a starting signal, not a claim of
 accuracy.
+
+## Strategy engine (Phase 9)
+
+```python
+from app.strategy.models import StrategyContext
+from app.strategy.engine import generate_signals, select_best_signal
+from app.strategy.candidate import to_trade_candidate
+from app.risk.risk_engine import RiskEngine
+from app.regime.detector import detect_regime
+from app.news.aggregator import fetch_all, filter_by_keyword
+
+# candles = MarketDataService().seed_history(...) then .store.candles(...)  (Phase 4)
+context = StrategyContext(
+    symbol="NSE:RELIANCE-EQ",
+    candles=candles,
+    regime=detect_regime(candles),
+    news_items=filter_by_keyword(fetch_all(), "Reliance"),
+)
+
+signals = generate_signals(context)          # every strategy that fired
+best = select_best_signal(signals)            # highest confidence -- a placeholder, not real arbitration
+if best:
+    candidate = to_trade_candidate(best, account_equity=5000.0, estimated_costs=15.0)
+    verdict = RiskEngine().evaluate(candidate)  # final authority, always
+    print(verdict.decision, verdict.reason)
+```
+
+Six strategies (trend/momentum/mean-reversion/breakout/VWAP/news), none
+backtested or calibrated — explicit starting rules, not a claim of edge
+(see `docs/PRINCIPLES.md`). **Live-verified (2026-08-25):** this exact
+pipeline ran here with real live news and synthetic candles, producing a
+real `RiskEngine` `APPROVE` — see the Phase 9 status note above for the
+full result.

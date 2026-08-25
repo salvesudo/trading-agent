@@ -19,6 +19,11 @@ library, not reimplemented here. Supertrend is hand-rolled (standard
 band-flip formula) and has **not** been cross-checked against another
 reference implementation or a live chart -- spot-check it before trusting
 it in a strategy.
+
+VWAP was added in Phase 9 when the VWAP strategy (app/strategy/vwap.py)
+needed it -- `ta` has no session-aware VWAP, and this one resets each
+trading day (see `vwap()`'s own docstring) rather than accumulating
+across days, which is the standard convention for what VWAP means.
 """
 from __future__ import annotations
 
@@ -211,6 +216,36 @@ def supertrend(candles: List[Candle], atr_window: int = 10, multiplier: float = 
     return SupertrendResult(value=value, direction=direction)
 
 
+def vwap(candles: List[Candle]) -> List[float]:
+    """Session (trading-day) VWAP -- resets at the start of each new
+    day rather than accumulating across multiple days, which is the
+    standard convention (VWAP is a same-day benchmark, not a
+    running-forever average). Day boundaries are computed in IST
+    (Asia/Kolkata), matching NSE's trading calendar, regardless of the
+    timezone `candle.timestamp` happens to carry (UTC throughout this
+    codebase -- see app/data/candle_builder.py)."""
+    if not candles:
+        raise InsufficientDataError("No candles provided.")
+    from zoneinfo import ZoneInfo
+
+    ist = ZoneInfo("Asia/Kolkata")
+    result: List[float] = []
+    cum_pv = 0.0
+    cum_vol = 0
+    current_day = None
+    for c in candles:
+        day = c.timestamp.astimezone(ist).date()
+        if day != current_day:
+            cum_pv = 0.0
+            cum_vol = 0
+            current_day = day
+        typical_price = (c.high + c.low + c.close) / 3
+        cum_pv += typical_price * c.volume
+        cum_vol += c.volume
+        result.append(cum_pv / cum_vol if cum_vol else typical_price)
+    return result
+
+
 __all__ = [
     "InsufficientDataError",
     "ema",
@@ -220,6 +255,7 @@ __all__ = [
     "adx",
     "bollinger_bands",
     "supertrend",
+    "vwap",
     "MACDResult",
     "ADXResult",
     "BollingerBandsResult",

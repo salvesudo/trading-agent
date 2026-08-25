@@ -30,6 +30,7 @@ from typing import List
 
 from app.analysis import indicators
 from app.analysis.indicators import InsufficientDataError
+from app.analysis.stats import percentile_rank as _percentile_rank
 from app.data.models import Candle
 
 
@@ -56,15 +57,10 @@ class RegimeSnapshot:
     atr_pct_percentile: float  # 0-100: where the latest atr_pct ranks in its own recent history
 
 
-def _percentile_rank(history: List[float], value: float) -> float:
-    """Percentage of `history` that is <= `value`. 0-100. Falls back to
-    the neutral midpoint (NORMAL-classifying) when there's no history to
-    rank against, rather than raising for what is often just a short
-    candle list rather than a real error."""
-    if not history:
-        return 50.0
-    below_or_equal = sum(1 for v in history if v <= value)
-    return 100.0 * below_or_equal / len(history)
+# _percentile_rank is app.analysis.stats.percentile_rank, re-exported
+# under its original name here (Phase 9 extracted it once
+# app/strategy/breakout.py needed the exact same logic -- see that
+# module's docstring).
 
 
 def detect_regime(

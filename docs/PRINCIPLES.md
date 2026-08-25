@@ -247,7 +247,30 @@ public RSS feeds need no FYERS credentials or whitelisted IP. Don't
 generalize that to mean other phases could have been verified here too;
 it's specific to this phase's data source being public.
 
-## 19. Everything here is defense in depth
+## 19. A signal is a proposal, never an order (Phase 9)
+
+`app/strategy/`'s six strategies each return a `StrategySignal`, not a
+`TradeCandidate` -- converting one to the other (`app/strategy/candidate.py`)
+is a separate, explicit step that adds account equity and cost estimates
+a strategy has no business knowing. No strategy imports anything from
+`app/broker/client.py`'s order-placement methods, and nothing in
+`app/strategy/` has any path to an order that doesn't go through the
+Risk Engine first (spec section 47, section 1 above). `select_best_signal`
+in `app/strategy/engine.py` is a simple confidence-based placeholder for
+picking among strategies that disagree -- not a claim it's the right way
+to arbitrate; real arbitration is later-phase work.
+
+None of the six strategies' specific rules were backtested or calibrated
+before shipping -- they're explicit, documented starting points, the
+same honesty standard as Phase 7's regime thresholds. Don't read "the
+Risk Engine approved a candidate" as "the strategy that produced it is
+good" -- the Risk Engine only checks that a trade's *risk math* is sound
+(position size, stop distance, daily/consecutive-loss limits), never
+whether the underlying signal has any real edge. That question is still
+completely open and won't be answered by anything before Phase 12
+(backtesting).
+
+## 20. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),
