@@ -199,7 +199,23 @@ database -- don't assume SQLite-specific behavior (or lack thereof, see
 `app/db/repository.py::_as_utc`) generalizes; test anything dialect-
 sensitive against both before trusting it in production.
 
-## 16. Everything here is defense in depth
+## 16. Indicators fail loud on insufficient data, and Supertrend is unverified (Phase 6)
+
+`app/analysis/indicators.py` raises `InsufficientDataError` rather than
+handing back a mostly-NaN series when there aren't enough candles for a
+requested window -- a NaN silently flowing into a later phase's strategy
+logic is a worse failure mode than an explicit exception here, at the
+one point that actually knows the data was too short.
+
+EMA/RSI/MACD/ATR/ADX/Bollinger Bands are thin wrappers over the `ta`
+library; Supertrend is hand-rolled because `ta` doesn't have one. Every
+other indicator in this module inherits `ta`'s own correctness; Supertrend
+inherits only whatever confidence its own directional tests provide (see
+`tests/test_indicators.py`) -- it has not been cross-checked against
+another implementation or a live chart. Treat it as the least-trusted
+piece of this phase until someone does that comparison.
+
+## 17. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

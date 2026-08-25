@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 5 — Database (PostgreSQL Schema)
+## Status: Phase 6 — Technical Analysis Engine
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -101,6 +101,28 @@ re-seeding. `app/db/repository.py` now normalizes every timestamp read
 back from the DB to UTC-aware, a no-op for Postgres and a real fix for
 SQLite.
 
+Phase 6 adds `app/analysis/indicators.py`: EMA, RSI, MACD, ATR, ADX, and
+Bollinger Bands, all thin typed wrappers over the `ta` library (whose
+exact method signatures were checked against the installed version before
+writing this, not assumed), plus a hand-rolled Supertrend since `ta`
+doesn't include one. Every function takes a `list[Candle]` and returns
+plain floats/lists — callers never touch pandas, and this module never
+imports `app/broker` or `app/data.store`, only `app/data/models.py`'s
+`Candle`. All functions raise `InsufficientDataError` rather than
+silently returning a mostly-NaN series when given fewer candles than a
+window needs. Advisory only, same as everything upstream of the Risk
+Engine — nothing here decides whether to trade (spec section 47).
+
+18 new tests (114 total), including golden-value checks where the math is
+simple enough to hand-verify independently (EMA of a constant series
+equals that constant; ATR converges to a fixed true range) and directional
+sanity checks for the rest. **Supertrend specifically has not been
+cross-checked against another reference implementation or a live chart**
+— only against its own directional logic (ends up below price in a clear
+uptrend, above price in a clear downtrend) — since it's hand-rolled rather
+than from an established library, spot-check its actual values before
+trusting it in a strategy.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -123,8 +145,8 @@ network access** and **no FYERS credentials**. That means:
 2. **FYERS API v3 integration (auth, order, quotes, WS)** ✅
 3. **Compliance checks (static IP, 2FA, permissions)** ✅
 4. **Market data service** ✅
-5. **Database (PostgreSQL schema)** ← you are here
-6. Technical analysis engine
+5. **Database (PostgreSQL schema)** ✅
+6. **Technical analysis engine** ← you are here
 7. Market regime detection
 8. News/sentiment engine
 9. Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)
@@ -237,6 +259,29 @@ downgrade) against a throwaway local SQLite database from this
 environment; it has **not** been run against a real Postgres server —
 that needs your own Postgres instance (local, Docker, or on the EC2 box)
 with `DATABASE_URL` pointed at it.
+
+## Technical indicators (Phase 6)
+
+```python
+from app.analysis import indicators
+from app.data.service import MarketDataService
+from app.data.models import Timeframe
+
+service = MarketDataService()
+service.seed_history("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE, "2025-01-01", "2025-01-02")
+candles = service.store.candles("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE)
+
+print("EMA20:", indicators.ema(candles, window=20)[-1])
+print("RSI14:", indicators.rsi(candles, window=14)[-1])
+print("ATR14:", indicators.atr(candles, window=14)[-1])
+st = indicators.supertrend(candles)
+print("Supertrend:", st.value[-1], "direction:", st.direction[-1])
+```
+
+Pure functions of whatever candles you hand them — no network, no
+broker/DB dependency. EMA/RSI/MACD/ATR/ADX/Bollinger Bands come from the
+`ta` library; Supertrend is hand-rolled and, unlike the rest, has not
+been cross-checked against another reference implementation.
 
 Neither `seed_history` (a real REST call to FYERS' `/history` endpoint)
 nor `start_streaming` (a real WebSocket connection) has been exercised
