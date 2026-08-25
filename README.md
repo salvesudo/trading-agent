@@ -39,6 +39,13 @@ only** in this phase — nothing yet blocks `LIVE` mode automatically based
 on them; that wiring is later-phase work, same as `AccountState` in the
 Risk Engine (see `docs/PRINCIPLES.md`).
 
+**Live-verified (2026-08-25):** the owner ran `compliance_check` on their
+EC2 instance — all three checks passed against the real FYERS API: outbound
+IP matched `FYERS_STATIC_IP`, today's token authenticated via a real
+`profile()` call, and `OWNER_CONFIRMED_ALGO_PERMISSIONS` was set after
+confirming with FYERS. Phase 3 is confirmed working end-to-end, not just
+unit-tested.
+
 This phase also fixed a real bug surfaced while testing it: `pydantic-settings`
 silently reads a trailing `# comment` as part of a blank `.env` value
 instead of stripping it, which had left `FYERS_ACCESS_TOKEN` holding
@@ -66,7 +73,8 @@ network access** and **no FYERS credentials**. That means:
 
 1. **Project foundation** ✅
 2. **FYERS API v3 integration (auth, order, quotes, WS)** ✅
-3. **Compliance checks (static IP, 2FA, permissions)** ← you are here
+3. **Compliance checks (static IP, 2FA, permissions)** ✅ ← you are here
+4. Market data service
 4. Market data service
 5. Database (PostgreSQL schema)
 6. Technical analysis engine
