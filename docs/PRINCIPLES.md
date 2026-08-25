@@ -167,7 +167,20 @@ of truth for them (see README). `OWNER_CONFIRMED_ALGO_PERMISSIONS` makes
 that gap an explicit, deliberate acknowledgment instead of a silent
 assumption.
 
-## 14. Everything here is defense in depth
+## 14. Volume is cumulative, not per-tick (Phase 4)
+
+FYERS quote updates (REST and WS alike) carry the day's *cumulative*
+traded volume, not a per-tick trade size. `app/data/candle_builder.py`
+diffs successive cumulative readings to get each candle's own volume,
+clamping negative deltas (e.g. a new trading day's counter resetting) to
+zero rather than subtracting. Anything built later that reads candle
+volume (breakout/volume-confirmation logic, for instance) depends on
+this being right -- if it silently regressed to just copying the
+cumulative field, every candle would report the full day's volume
+instead of its own, and nothing about that would look obviously wrong
+in a quick glance at the numbers.
+
+## 15. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

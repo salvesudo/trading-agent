@@ -23,6 +23,13 @@ class FakeBroker:
     def __init__(self):
         self.calls = []
         self.place_order_response = {"s": "ok", "id": "ORDER123"}
+        self.history_response = {
+            "s": "ok",
+            "candles": [
+                [1735600200, 2490.0, 2510.0, 2485.0, 2500.0, 100000],
+                [1735600260, 2500.0, 2515.0, 2495.0, 2505.0, 120000],
+            ],
+        }
         self.quotes_response = {
             "s": "ok",
             "d": [
@@ -62,6 +69,10 @@ class FakeBroker:
     def quotes(self, data):
         self.calls.append(("quotes", data))
         return self.quotes_response
+
+    def history(self, data):
+        self.calls.append(("history", data))
+        return self.history_response
 
     def place_order(self, data):
         self.calls.append(("place_order", data))
@@ -159,6 +170,31 @@ def test_modify_and_cancel_order_refused_in_paper_mode():
         client.modify_order(OrderModifyRequest(order_id="ORDER123", limit_price=2500.0))
     with pytest.raises(BrokerError):
         client.cancel_order("ORDER123")
+
+
+def test_history_passes_through_and_sends_expected_payload():
+    broker = FakeBroker()
+    client = FyersClient(broker)
+    response = client.history(
+        symbol="NSE:RELIANCE-EQ",
+        resolution="1",
+        range_from="2025-01-01",
+        range_to="2025-01-02",
+    )
+    assert response["candles"] == broker.history_response["candles"]
+    assert broker.calls == [
+        (
+            "history",
+            {
+                "symbol": "NSE:RELIANCE-EQ",
+                "resolution": "1",
+                "date_format": 1,
+                "range_from": "2025-01-01",
+                "range_to": "2025-01-02",
+                "cont_flag": 0,
+            },
+        )
+    ]
 
 
 def test_from_settings_raises_without_credentials():

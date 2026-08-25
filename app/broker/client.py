@@ -50,6 +50,7 @@ class SupportsFyersModel(Protocol):
     def orderbook(self, data: dict | None = None) -> dict: ...
     def tradebook(self) -> dict: ...
     def quotes(self, data: dict) -> dict: ...
+    def history(self, data: dict) -> dict: ...
     def place_order(self, data: dict) -> dict: ...
     def modify_order(self, data: dict) -> dict: ...
     def cancel_order(self, data: dict) -> dict: ...
@@ -142,6 +143,29 @@ class FyersClient:
                 raw=item,
             )
         return result
+
+    def history(
+        self,
+        symbol: str,
+        resolution: str,
+        range_from: str,
+        range_to: str,
+        date_format: int = 1,
+        cont_flag: int = 0,
+    ) -> dict:
+        """Raw passthrough to FYERS' /history endpoint. Prefer
+        app.data.history.fetch_candles() for a typed result -- this
+        exists so that module has a client method to call instead of
+        reaching past this client into the SDK directly."""
+        payload = {
+            "symbol": symbol,
+            "resolution": resolution,
+            "date_format": date_format,
+            "range_from": range_from,
+            "range_to": range_to,
+            "cont_flag": cont_flag,
+        }
+        return _check_ok(self._broker.history(payload), "history")
 
     # --- order endpoints: gated on TRADING_MODE=LIVE, always ---
 

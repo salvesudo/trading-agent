@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 3 — Compliance Checks
+## Status: Phase 4 — Market Data Service
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -53,6 +53,18 @@ literal comment text. `.env.example` was reformatted (no more trailing
 inline comments) and `Settings` now rejects any config value containing
 `#` at startup, so this can't silently recur.
 
+Phase 4 adds `app/data/`: historical OHLC fetch (`app/data/history.py`,
+via a new `FyersClient.history()`), a pure-logic tick→candle aggregator
+(`app/data/candle_builder.py` — correctly diffs FYERS' *cumulative* daily
+volume field into per-candle volume, not just copying it), an in-memory
+`MarketDataStore` (latest quote + bounded candle history per symbol/
+timeframe), and `MarketDataService` tying historical seeding + the Phase 2
+WebSocket stream + the store together. Read-only by construction — this
+module has no import path to anything that places an order. Not
+exercised against a live WS tick stream from this environment; the WS
+message parsing is deliberately defensive (drops anything it doesn't
+recognize rather than raising) for exactly that reason.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -73,9 +85,8 @@ network access** and **no FYERS credentials**. That means:
 
 1. **Project foundation** ✅
 2. **FYERS API v3 integration (auth, order, quotes, WS)** ✅
-3. **Compliance checks (static IP, 2FA, permissions)** ✅ ← you are here
-4. Market data service
-4. Market data service
+3. **Compliance checks (static IP, 2FA, permissions)** ✅
+4. **Market data service** ← you are here
 5. Database (PostgreSQL schema)
 6. Technical analysis engine
 7. Market regime detection
@@ -146,3 +157,24 @@ FYERS API — to check your static IP actually matches what's whitelisted
 and today's token actually still works. Results are advisory only right
 now (see `docs/PRINCIPLES.md`); nothing blocks `LIVE` mode based on them
 yet.
+
+## Market data (Phase 4)
+
+```python
+from app.data.service import MarketDataService
+from app.data.models import Timeframe
+
+service = MarketDataService()  # uses FyersClient.from_settings() internally
+service.seed_history("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE, "2025-01-01", "2025-01-02")
+service.track("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE)
+# service.start_streaming(["NSE:RELIANCE-EQ"])  # blocks; run in its own thread/process
+
+print(service.store.latest_quote("NSE:RELIANCE-EQ"))
+print(service.store.candles("NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE))
+```
+
+Neither `seed_history` (a real REST call to FYERS' `/history` endpoint)
+nor `start_streaming` (a real WebSocket connection) has been exercised
+against live FYERS endpoints yet — only against fakes in the test suite.
+The WS message parsing in particular is defensive by design (drops
+anything it doesn't recognize rather than raising) because of that.
