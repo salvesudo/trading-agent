@@ -134,7 +134,22 @@ No module upstream of the Risk Engine may talk to the broker directly.
   "Skipping ahead to live execution" is called out explicitly as the
   failure mode this order exists to prevent.
 
-## 12. Everything here is defense in depth
+## 12. The broker client is its own guard, too (Phase 2)
+
+`app/broker/client.py::FyersClient` re-checks `settings.is_live` on every
+call that can create, modify, or cancel an order, and refuses outright if
+`TRADING_MODE` is not `LIVE` — independent of the Risk Engine, the agent's
+own `build_paper_agent` check (section 9), and whatever the execution
+engine will eventually do in a later phase. Read-only calls (quotes,
+profile, positions, funds, orderbook, tradebook) carry no such guard —
+later phases need those in `PAPER` mode too, and none of them can move
+money or create broker-side state.
+
+The daily auth flow (`app/broker/auth.py`, run as `python -m app.broker.auth`)
+only ever writes an access token to `.env`. It has no path to place an
+order either, by construction, not just by convention.
+
+## 13. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

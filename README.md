@@ -3,14 +3,21 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 1 — Project Foundation
+## Status: Phase 2 — FYERS API v3 Integration
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
 `TRADING_MODE` defaults to `PAPER` and there is no code path that flips it
 automatically — that switch is a manual, deliberate act by the owner after
-paper-trading acceptance criteria are met (see `docs/ACCEPTANCE_CRITERIA.md`,
-added in a later phase).
+paper-trading acceptance criteria are met (see `docs/ACCEPTANCE_CRITERIA.md`).
+
+Phase 2 adds `app/broker/`: a typed FYERS v3 client (auth, quotes, orders,
+WebSocket market data and order updates). Every call that can create,
+modify, or cancel a live order is refused unless `TRADING_MODE=LIVE` — a
+guard independent of the Risk Engine and the agent's own PAPER-only check
+(defense in depth, see `docs/PRINCIPLES.md` section 12). Read-only calls
+(quotes, profile, positions, funds) work in PAPER mode, since later phases
+need them without placing anything.
 
 ## What this environment can and can't do
 
@@ -30,8 +37,8 @@ network access** and **no FYERS credentials**. That means:
 
 ## Build order (matches owner spec section 63)
 
-1. **Project foundation** ← you are here
-2. FYERS API v3 integration (auth, order, quotes, WS)
+1. **Project foundation** ✅
+2. **FYERS API v3 integration (auth, order, quotes, WS)** ← you are here
 3. Compliance checks (static IP, 2FA, permissions)
 4. Market data service
 5. Database (PostgreSQL schema)
@@ -72,3 +79,17 @@ python -m app --symbol RELIANCE --side BUY --entry 2500 --stop 2480 --target 256
 The command above is the initial agent loop: it accepts a candidate, applies
 the risk veto, and reports the approved quantity. Market data, paper fills,
 and execution adapters are intentionally not connected yet.
+
+## FYERS daily login (Phase 2, requires your own credentials + static IP)
+
+```bash
+# Fill in FYERS_APP_ID / FYERS_SECRET_ID / FYERS_REDIRECT_URI in .env first.
+python -m app.broker.auth
+```
+
+Prints a login URL — open it, complete FYERS login + 2FA, then paste the
+redirect URL (or just the `auth_code` in it) back into the prompt. The
+resulting access token is written to `.env`; it expires at the end of the
+trading day, so this needs to run again each morning before trading starts.
+This has not been run against the live FYERS API from this environment —
+see "What this environment can and can't do" above.
