@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 
 class TradingMode(str, Enum):
@@ -33,6 +33,18 @@ class Settings(BaseSettings):
     fyers_redirect_uri: str = Field(default="", alias="FYERS_REDIRECT_URI")
     fyers_static_ip: str = Field(default="", alias="FYERS_STATIC_IP")
     fyers_access_token: str = Field(default="", alias="FYERS_ACCESS_TOKEN")
+
+    # --- Compliance (Phase 3: spec section 3) ---
+    # Whether the FYERS app/account has been confirmed (by the owner, with
+    # FYERS/exchange directly) to have whatever SEBI algo-trading
+    # registration or permission current rules require. This is not
+    # something code can verify -- FYERS' own requirements and SEBI's algo
+    # framework change over time (see README's disclaimer). It exists so
+    # that gap is an explicit, deliberate acknowledgment rather than a
+    # silent assumption.
+    owner_confirmed_algo_permissions: bool = Field(
+        default=False, alias="OWNER_CONFIRMED_ALGO_PERMISSIONS"
+    )
 
     # --- Capital & risk (spec sections 2, 4, 5, 22, 23) ---
     initial_capital_inr: float = Field(default=5000.0, alias="INITIAL_CAPITAL_INR")
@@ -81,6 +93,27 @@ class Settings(BaseSettings):
                 "and you understand the increased risk."
             )
         return v
+
+    @model_validator(mode="after")
+    def _reject_unstripped_inline_comments(self) -> "Settings":
+        # pydantic-settings' .env parser only strips a trailing "# comment"
+        # when a real value already precedes it on that line; on a *blank*
+        # value it reads the whole comment as the literal value instead
+        # (bit us once already with FYERS_STATIC_IP -- see git history).
+        # No legitimate value in this config should ever contain "#", so
+        # catch the whole bug class here rather than relying on every .env
+        # line being hand-formatted correctly forever.
+        for name in self.__class__.model_fields:
+            value = getattr(self, name)
+            if isinstance(value, str) and "#" in value:
+                raise ValueError(
+                    f"{name} contains '#' ({value!r}) -- this usually means "
+                    "an inline comment in .env got read as part of the value "
+                    "because the value before it was blank. Put the comment "
+                    "on its own line above the KEY=value line instead, and "
+                    "leave the value line completely clean."
+                )
+        return self
 
     @property
     def is_live(self) -> bool:
