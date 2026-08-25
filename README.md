@@ -93,3 +93,8 @@ resulting access token is written to `.env`; it expires at the end of the
 trading day, so this needs to run again each morning before trading starts.
 This has not been run against the live FYERS API from this environment —
 see "What this environment can and can't do" above.
+
+If `FYERS_REDIRECT_URI` points at a server you actually control (e.g. an
+EC2 instance with the port open), `python -m app.broker.callback_server`
+does the same thing without the copy-paste step: it listens for the
+redirect, captures `auth_code` automatically, and writes the token itself.
