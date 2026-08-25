@@ -65,6 +65,14 @@ exercised against a live WS tick stream from this environment; the WS
 message parsing is deliberately defensive (drops anything it doesn't
 recognize rather than raising) for exactly that reason.
 
+**Live-verified (2026-08-25):** the owner ran `MarketDataService.seed_history()`
+on their EC2 instance — a real call to FYERS' `/history` endpoint returned
+750 one-minute `NSE:RELIANCE-EQ` candles, correctly parsed into typed
+`Candle` objects (epoch timestamps, OHLCV all sane). Historical fetch is
+confirmed working end-to-end. `start_streaming()` (the live WebSocket tick
+path, and the volume-diffing in `candle_builder.py` operating on real
+cumulative-volume ticks) remains unverified against live FYERS endpoints.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
