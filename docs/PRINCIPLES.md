@@ -149,7 +149,25 @@ The daily auth flow (`app/broker/auth.py`, run as `python -m app.broker.auth`)
 only ever writes an access token to `.env`. It has no path to place an
 order either, by construction, not just by convention.
 
-## 13. Everything here is defense in depth
+## 13. Compliance checks are advisory until they have somewhere to live (Phase 3)
+
+`app/security/compliance.py` (`python -m app.security.compliance_check`)
+checks the static IP, session/token freshness, and an explicit
+`OWNER_CONFIRMED_ALGO_PERMISSIONS` acknowledgment. None of it is wired
+into the Risk Engine or the agent loop automatically yet — same as
+`AccountState` in section 7, it needs a database (Phase 5) to be
+something the running system can check on every cycle rather than a
+script the owner runs by hand. Treat a failing compliance check as a
+reason not to trade that day, manually, until that wiring exists.
+
+The one check code cannot do itself is confirming SEBI algo-trading /
+FYERS permission requirements are actually met -- those requirements
+change over time and this codebase should not be trusted as the source
+of truth for them (see README). `OWNER_CONFIRMED_ALGO_PERMISSIONS` makes
+that gap an explicit, deliberate acknowledgment instead of a silent
+assumption.
+
+## 14. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 2 — FYERS API v3 Integration
+## Status: Phase 3 — Compliance Checks
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -27,6 +27,25 @@ EC2 instance — login, 2FA, redirect capture, code exchange, and real
 placement/modify/cancel and both WebSocket clients remain unverified
 against live FYERS endpoints.
 
+Phase 3 adds `app/security/compliance.py` and the
+`python -m app.security.compliance_check` script: static-IP verification
+(fetches this machine's outbound IP and compares it to `FYERS_STATIC_IP`),
+session/token freshness (a real `profile()` call — there's no other
+reliable way to know today's token still works), and an explicit
+`OWNER_CONFIRMED_ALGO_PERMISSIONS` acknowledgment for the one thing code
+genuinely cannot verify itself: current SEBI algo-trading / FYERS
+permission requirements for this account. These results are **advisory
+only** in this phase — nothing yet blocks `LIVE` mode automatically based
+on them; that wiring is later-phase work, same as `AccountState` in the
+Risk Engine (see `docs/PRINCIPLES.md`).
+
+This phase also fixed a real bug surfaced while testing it: `pydantic-settings`
+silently reads a trailing `# comment` as part of a blank `.env` value
+instead of stripping it, which had left `FYERS_ACCESS_TOKEN` holding
+literal comment text. `.env.example` was reformatted (no more trailing
+inline comments) and `Settings` now rejects any config value containing
+`#` at startup, so this can't silently recur.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -46,8 +65,8 @@ network access** and **no FYERS credentials**. That means:
 ## Build order (matches owner spec section 63)
 
 1. **Project foundation** ✅
-2. **FYERS API v3 integration (auth, order, quotes, WS)** ← you are here
-3. Compliance checks (static IP, 2FA, permissions)
+2. **FYERS API v3 integration (auth, order, quotes, WS)** ✅
+3. **Compliance checks (static IP, 2FA, permissions)** ← you are here
 4. Market data service
 5. Database (PostgreSQL schema)
 6. Technical analysis engine
@@ -106,3 +125,16 @@ If `FYERS_REDIRECT_URI` points at a server you actually control (e.g. an
 EC2 instance with the port open), `python -m app.broker.callback_server`
 does the same thing without the copy-paste step: it listens for the
 redirect, captures `auth_code` automatically, and writes the token itself.
+
+## Compliance check (Phase 3, contacts the network)
+
+```bash
+python -m app.security.compliance_check
+```
+
+Run this after the daily login, before trading. Unlike `config_check`, it
+genuinely contacts the network — a public IP-lookup service and the real
+FYERS API — to check your static IP actually matches what's whitelisted
+and today's token actually still works. Results are advisory only right
+now (see `docs/PRINCIPLES.md`); nothing blocks `LIVE` mode based on them
+yet.

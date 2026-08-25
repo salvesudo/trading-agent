@@ -50,7 +50,8 @@ def main() -> None:
 
     print("=" * 60)
     print("This check does NOT contact FYERS or verify the static IP is")
-    print("actually whitelisted -- that happens in Phase 2/3 integration tests.")
+    print("actually whitelisted -- run python -m app.security.compliance_check")
+    print("for that (it contacts the network; this script never does).")
 
 
 if __name__ == "__main__":
