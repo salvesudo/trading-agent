@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 
 from app.agent import build_paper_agent
+from app.core.console import ensure_utf8_stdio
 from app.risk.risk_engine import TradeCandidate
 
 
@@ -20,6 +21,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    ensure_utf8_stdio()
     args = _parser().parse_args()
     agent = build_paper_agent()
     result = agent.run_once(

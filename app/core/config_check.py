@@ -6,6 +6,7 @@ values -- only whether a variable is set, per spec section 42/43 (never
 expose credentials in logs).
 """
 from app.core.config import settings, TradingMode
+from app.core.console import ensure_utf8_stdio
 
 
 def _status(label: str, ok: bool, detail: str = "") -> str:
@@ -14,6 +15,7 @@ def _status(label: str, ok: bool, detail: str = "") -> str:
 
 
 def main() -> None:
+    ensure_utf8_stdio()
     print("=" * 60)
     print("FYERS TRADING AGENT — CONFIG CHECK")
     print("=" * 60)
