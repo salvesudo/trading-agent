@@ -19,6 +19,14 @@ guard independent of the Risk Engine and the agent's own PAPER-only check
 (quotes, profile, positions, funds) work in PAPER mode, since later phases
 need them without placing anything.
 
+**Live-verified (2026-08-25):** the owner ran the full daily login flow
+(`app/broker/callback_server.py`) against the real FYERS API from their own
+EC2 instance — login, 2FA, redirect capture, code exchange, and a real
+`profile()` call all succeeded end-to-end. Quotes, order placement/modify/
+cancel, and both WebSocket clients remain unverified against live FYERS
+endpoints; this confirms the auth path and REST plumbing, not the rest of
+`app/broker/`.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
