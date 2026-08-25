@@ -229,7 +229,25 @@ against actual trading outcomes for the instruments this will trade.
 Revisit them once Phase 9 (strategy engine) or Phase 12 (backtesting)
 produces real evidence one way or the other.
 
-## 18. Everything here is defense in depth
+## 18. News sentiment is a keyword heuristic, not a model (Phase 8)
+
+`app/news/sentiment.py` counts positive/negative words from a small,
+curated list -- it will misfire on sarcasm, negation ("shares fail to
+fall"), and any real sentiment expressed in words that aren't on either
+list. It's an honest, zero-dependency starting point, not a claim of
+accuracy, and it was chosen deliberately over an LLM-based score for
+this phase (see README's Phase 8 note on the source-selection decision).
+Phase 13 (AI decision engine) is the natural place to replace or augment
+it later -- don't assume this scorer is good enough to drive a real
+trading decision on its own before that happens.
+
+This is also the first phase in this project genuinely live-verified
+*from Claude's own environment*, not just reported back by the owner --
+public RSS feeds need no FYERS credentials or whitelisted IP. Don't
+generalize that to mean other phases could have been verified here too;
+it's specific to this phase's data source being public.
+
+## 19. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

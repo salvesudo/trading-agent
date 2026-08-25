@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 7 — Market Regime Detection
+## Status: Phase 8 — News/Sentiment Engine
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -145,6 +145,30 @@ a false HIGH classification). `detect_regime` excludes them from the
 distribution; a test computes both the buggy and correct percentile from
 the same data and confirms the code matches the correct one.
 
+Phase 8 adds `app/news/`: free RSS feeds from four Indian financial
+publishers (Moneycontrol, Economic Times, LiveMint, Business Standard —
+`app/news/feeds.py`), a hand-rolled RSS 2.0 parser (`app/news/rss_client.py`,
+stdlib `xml.etree.ElementTree` + `email.utils` — no new dependency,
+deliberately, since every feed was confirmed to be standard RSS 2.0
+before writing this rather than reached for a general-purpose feed
+library up front), simple lexicon-based sentiment scoring
+(`app/news/sentiment.py`), and `app/news/aggregator.py` tying fetch +
+keyword filtering + scoring together. Advisory only, same as every
+analysis-layer module here — nothing decides whether to trade.
+
+**Live-verified (2026-08-25) — from this environment itself, not just
+by the owner:** unlike every FYERS-dependent phase, public RSS feeds
+need no credentials or whitelisted IP, so `fetch_all()` was run for real
+here and returned 124 genuine, current news items across all four
+sources, correctly merged and sorted by actual publish time, with
+keyword filtering and sentiment scoring both exercised on live data (the
+sentiment output is noisy, as documented — a crude keyword heuristic,
+not a claim of accuracy).
+
+22 new tests (148 total). Parser tests use fixtures faithful to each
+feed's real, confirmed structure (CDATA usage, RFC-822 dates) rather
+than invented XML shapes.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -169,8 +193,8 @@ network access** and **no FYERS credentials**. That means:
 4. **Market data service** ✅
 5. **Database (PostgreSQL schema)** ✅
 6. **Technical analysis engine** ✅
-7. **Market regime detection** ← you are here
-8. News/sentiment engine
+7. **Market regime detection** ✅
+8. **News/sentiment engine** ← you are here
 9. Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)
 10. Risk engine ← skeleton included now, since it has veto power over every
     later phase and everything else must be built to respect it
@@ -327,3 +351,22 @@ Trend threshold (ADX ≥ 25) and volatility percentile cutoffs (33rd/67th)
 are defensible starting points, not calibrated against real trading
 outcomes for the instruments this will actually trade — see
 `docs/PRINCIPLES.md` section 17.
+
+## News/sentiment (Phase 8, no credentials needed — public RSS feeds)
+
+```python
+from app.news.aggregator import fetch_all, filter_by_keyword, score_all
+
+items = fetch_all()  # all 4 known feeds; one source failing doesn't block the rest
+reliance_news = filter_by_keyword(items, "Reliance")
+scored = score_all(items[:10])
+for s in scored:
+    print(s.sentiment.sentiment.value, s.sentiment.score, s.item.title)
+```
+
+Genuinely live-tested from this environment (see the Phase 8 status note
+above) — the one phase so far that didn't need your FYERS credentials or
+EC2 setup to verify, since these are public feeds. Sentiment is a simple
+keyword-count heuristic (`app/news/sentiment.py`), not an ML model or an
+LLM — expect it to be noisy; it's a starting signal, not a claim of
+accuracy.
