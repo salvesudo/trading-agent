@@ -1,0 +1,74 @@
+# FYERS AI Trading Agent
+
+Autonomous, AI-assisted intraday trading system for FYERS API v3.
+Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
+
+## Status: Phase 1 — Project Foundation
+
+This repo is being built in the exact phase order specified by the owner's
+master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
+`TRADING_MODE` defaults to `PAPER` and there is no code path that flips it
+automatically — that switch is a manual, deliberate act by the owner after
+paper-trading acceptance criteria are met (see `docs/ACCEPTANCE_CRITERIA.md`,
+added in a later phase).
+
+## What this environment can and can't do
+
+This codebase was generated in a sandboxed dev environment with **no live
+network access** and **no FYERS credentials**. That means:
+
+- All FYERS API integration code is written against the documented v3 REST/WS
+  contract, but has **not been exercised against the live API** from here.
+- Static IP provisioning, FYERS IP whitelisting, and daily 2FA/auth flows
+  must be completed by you, on your own server, before Phase 2 testing.
+- You must supply `FYERS_APP_ID`, `FYERS_SECRET_ID`, `FYERS_REDIRECT_URI` etc.
+  via `.env` (never commit this file). Nothing here hardcodes credentials.
+- Before any live order is placed, you are responsible for independently
+  verifying current FYERS API v3 behavior, rate limits, and SEBI algo-trading
+  requirements against FYERS' own current documentation — these change over
+  time and this code should not be trusted as the source of truth for them.
+
+## Build order (matches owner spec section 63)
+
+1. **Project foundation** ← you are here
+2. FYERS API v3 integration (auth, order, quotes, WS)
+3. Compliance checks (static IP, 2FA, permissions)
+4. Market data service
+5. Database (PostgreSQL schema)
+6. Technical analysis engine
+7. Market regime detection
+8. News/sentiment engine
+9. Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)
+10. Risk engine ← skeleton included now, since it has veto power over every
+    later phase and everything else must be built to respect it
+11. Paper trading engine
+12. Backtesting engine
+13. AI decision engine (LLM layer, advisory only)
+14. Execution engine
+15. Position reconciliation
+16. Trading journal
+17. Notifications (email/SMS/WhatsApp)
+18. Dashboard
+19. Monitoring/health checks
+20. Security hardening
+21. Production deployment (Docker, systemd, static IP, HTTPS)
+22. Small-capital live testing (₹5,000, 1% risk cap)
+
+Each phase should be implemented, tested, and validated before the next
+begins — no skipping ahead to live execution.
+
+## Quick start (dev machine, paper mode only)
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # fill in your own values, never commit this
+python -m app.core.config_check   # sanity-checks env vars, prints nothing live
+# Evaluate one candidate through the risk engine; this never submits an order.
+python -m app --symbol RELIANCE --side BUY --entry 2500 --stop 2480 --target 2560 --equity 5000 --costs 15
+```
+
+The command above is the initial agent loop: it accepts a candidate, applies
+the risk veto, and reports the approved quantity. Market data, paper fills,
+and execution adapters are intentionally not connected yet.
