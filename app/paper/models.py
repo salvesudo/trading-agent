@@ -7,6 +7,14 @@ touches). It exists purely to give the Risk Engine's approvals
 somewhere to live and be tracked to a close, so "today's realized P&L"
 (app/risk/risk_engine.py's AccountState) and the profit reserve
 (app/risk/capital_ledger.py) have real numbers to work from.
+
+`strategy` (added in Phase 12) is deliberately a plain string, not an
+imported `app.strategy.models.StrategyName` -- same reason `side` is a
+plain str rather than an imported broker enum: this module stays
+decoupled from what produced a position, it only tracks the position
+itself. It exists so a backtest (app/backtest/engine.py) can attribute
+results per strategy; it's optional and defaults to None everywhere
+else, so nothing that predates Phase 12 needs to change.
 """
 from __future__ import annotations
 
@@ -41,6 +49,7 @@ class PaperPosition:
     exit_price: Optional[float] = None
     exit_reason: Optional[ExitReason] = None
     closed_at: Optional[dt.datetime] = None
+    strategy: Optional[str] = None  # e.g. "TREND_FOLLOWING" -- see module docstring
 
     @property
     def is_open(self) -> bool:
@@ -65,6 +74,7 @@ class PaperPosition:
             entry_price=self.entry_price, stop_loss=self.stop_loss, target=self.target,
             opened_at=self.opened_at, status=PositionStatus.CLOSED,
             exit_price=exit_price, exit_reason=reason, closed_at=closed_at,
+            strategy=self.strategy,
         )
 
     def realized_pnl(self) -> float:

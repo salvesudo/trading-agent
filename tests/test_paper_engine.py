@@ -37,6 +37,15 @@ def test_open_position_creates_tracked_position():
     assert position.quantity == 7
     assert position.is_open
     assert engine.open_positions == [position]
+    assert position.strategy is None  # optional, defaults to None when not given
+
+
+def test_open_position_carries_optional_strategy_through_to_close():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(), _approved_verdict(), _time(), strategy="TREND_FOLLOWING")
+
+    closed = engine.process_price_update("RELIANCE", price=2475.0, current_time=_time(10, 5))
+    assert closed.strategy == "TREND_FOLLOWING"
 
 
 def test_open_position_rejects_non_approved_verdict():

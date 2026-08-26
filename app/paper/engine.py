@@ -52,9 +52,16 @@ class PaperTradingEngine:
         return list(self._open.values())
 
     def open_position(
-        self, candidate: TradeCandidate, verdict: RiskVerdict, opened_at: dt.datetime
+        self,
+        candidate: TradeCandidate,
+        verdict: RiskVerdict,
+        opened_at: dt.datetime,
+        strategy: Optional[str] = None,
     ) -> PaperPosition:
-        """Open a simulated fill for an APPROVED candidate."""
+        """Open a simulated fill for an APPROVED candidate. `strategy`
+        (Phase 12) is optional and defaults to None -- pass
+        `signal.strategy.value` when the caller has the originating
+        StrategySignal, e.g. for backtest attribution."""
         if verdict.decision != RiskDecision.APPROVE:
             raise ValueError(
                 f"Cannot open a position from a non-approved verdict ({verdict.decision.value})."
@@ -73,6 +80,7 @@ class PaperTradingEngine:
             stop_loss=candidate.stop_loss,
             target=candidate.target,
             opened_at=opened_at,
+            strategy=strategy,
         )
         self._open[candidate.symbol] = position
         return position

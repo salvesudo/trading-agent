@@ -22,6 +22,32 @@ def session():
         yield s
 
 
+def test_compute_next_account_state_win_resets_streak():
+    current = AccountState(today_realized_pnl=10.0, consecutive_losses=3)
+    updated = service.compute_next_account_state(current, realized_pnl=50.0)
+    assert updated.today_realized_pnl == pytest.approx(60.0)
+    assert updated.consecutive_losses == 0
+
+
+def test_compute_next_account_state_loss_increments_streak():
+    current = AccountState(today_realized_pnl=10.0, consecutive_losses=1)
+    updated = service.compute_next_account_state(current, realized_pnl=-20.0)
+    assert updated.today_realized_pnl == pytest.approx(-10.0)
+    assert updated.consecutive_losses == 2
+
+
+def test_compute_next_account_state_breakeven_leaves_streak_unchanged():
+    current = AccountState(today_realized_pnl=10.0, consecutive_losses=2)
+    updated = service.compute_next_account_state(current, realized_pnl=0.0)
+    assert updated.consecutive_losses == 2
+
+
+def test_compute_next_account_state_preserves_system_healthy():
+    current = AccountState(system_healthy=False)
+    updated = service.compute_next_account_state(current, realized_pnl=10.0)
+    assert updated.system_healthy is False
+
+
 def test_load_account_state_defaults_when_nothing_saved(session):
     assert service.load_account_state(session, trade_date=dt.date(2026, 1, 1)) == AccountState()
 

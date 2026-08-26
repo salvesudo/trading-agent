@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 11 — Paper Trading Engine
+## Status: Phase 12 — Backtesting Engine
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -311,6 +311,48 @@ Phase 4's live WebSocket stream, the Strategy Engine, and this phase's
 `open_position`/`close_position` into an actual running loop) is the
 next increment, not yet built.
 
+Phase 12 adds `app/backtest/`: replays historical candles through the
+**exact production code path** — `generate_signals` → `RiskEngine` →
+`PaperTradingEngine` — bar by bar, with no look-ahead (at simulated bar
+`i`, every decision only ever sees `candles[:i+1]`). This is deliberate:
+a backtest that reimplements strategy/risk logic separately could
+quietly diverge from what actually runs live, and answering "does this
+strategy have edge" on a fork of the logic wouldn't be trustworthy.
+`PaperPosition` (Phase 11) gained an optional `strategy` field (plain
+string, not an enum import — same reason `side` already is one) purely
+so a backtest can attribute results per strategy; propagated through
+`app/paper/engine.py`, `app/paper/service.py`, and a new `paper_trades.strategy`
+column (migration `d903390e1d8e`), fully backward-compatible (defaults
+to `None` everywhere it isn't given).
+
+`app/risk/service.py::record_trade_close`'s win/loss-streak logic was
+extracted into a pure `compute_next_account_state` so the backtest
+engine (in-memory, no DB) and the DB-backed service share one rule
+instead of risking two copies drifting apart.
+
+**News is not backtested** — there's no historical news archive, only
+live RSS feeds (Phase 8), so every backtest passes `news_items=[]` and
+the NEWS strategy simply never fires here. A result that would have
+depended on news won't show up in a backtest report at all; this is a
+real, current limitation, not a design choice to be proud of.
+
+`python -m app.backtest.run_backtest --symbol ... --from-date ... --to-date ...`
+fetches real candles via `FyersClient.history()` and prints a full
+report (win rate, drawdown, per-strategy P&L breakdown). Same discipline
+as the SDK/library verification throughout this project: I confirmed
+the pipeline genuinely works end-to-end with synthetic data run through
+the *real* strategy/risk/paper-engine code (a sustained synthetic
+uptrend produced 80 trades, 79 wins, 1 loss, entirely via
+`TREND_FOLLOWING`) — but **this has not been run against real market
+data from this environment**, since there are no FYERS credentials
+here. This is the script meant to finally answer, on real history,
+whether any of the six strategies have actual edge — running it for
+real is the natural next step on the EC2 instance.
+
+13 new tests (276 total): 8 for the backtest engine itself, plus a few
+each for the extracted `compute_next_account_state` and the new
+`strategy` field's propagation through Phase 11.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -341,9 +383,11 @@ network access** and **no FYERS credentials**. That means:
 10. **Risk engine** ✅ (skeleton was included back in Phase 1, since it
     has veto power over every later phase; this phase wired it to the
     database and capital ledger)
-11. **Paper trading engine** ✅ ← you are here (position lifecycle +
-    persistence; no live scheduler loop yet)
-12. Backtesting engine
+11. **Paper trading engine** ✅ (position lifecycle + persistence; no
+    live scheduler loop yet)
+12. **Backtesting engine** ✅ ← you are here (replays real history
+    through the production strategy/risk/paper-engine code; not yet run
+    against real market data from this environment)
 13. AI decision engine (LLM layer, advisory only)
 14. Execution engine
 15. Position reconciliation
@@ -649,3 +693,31 @@ closes at `INTRADAY_SQUARE_OFF_TIME` (default 15:15 IST) since this
 system holds nothing overnight. **No live scheduler yet** — every call
 above needs an explicit price/timestamp; nothing polls the market on
 its own.
+
+## Backtesting (Phase 12)
+
+```bash
+# Needs a working daily login (app/broker/auth.py) -- real historical
+# data, real credentials. Never places an order; read-only.
+python -m app.backtest.run_backtest \
+    --symbol NSE:RELIANCE-EQ --timeframe 5 \
+    --from-date 2025-01-01 --to-date 2025-06-01
+```
+
+```python
+from app.backtest.engine import run_backtest
+
+result = run_backtest(candles, "NSE:RELIANCE-EQ")  # candles from Phase 4
+print(result.total_trades, result.win_rate_pct, result.total_realized_pnl_inr)
+for stats in result.per_strategy:
+    print(stats.strategy, stats.trade_count, stats.win_rate_pct, stats.total_pnl_inr)
+```
+
+Replays candles through the real `generate_signals` → `RiskEngine` →
+`PaperTradingEngine` code path, bar by bar, with no look-ahead. Pure and
+DB-free — never touches the tables Phase 5/11 use for real state. News
+is not included (no historical archive exists); a result leaning on the
+NEWS strategy won't appear here. **Not yet run against real market data
+from this environment** — the CLI needs real FYERS credentials this
+sandbox doesn't have; this is the natural next thing to run for real on
+the EC2 instance.

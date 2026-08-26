@@ -287,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 23 (defense in depth). Nothing to
+("Survival > profit") and section 24 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -426,7 +426,41 @@ work -- don't describe Phase 11 as "the agent can trade now." It can't,
 yet; it can be driven, one explicit call at a time, to prove every piece
 behaves correctly.
 
-## 23. Everything here is defense in depth
+## 23. A backtest is only trustworthy if it runs the real code (Phase 12)
+
+`app/backtest/engine.py` replays historical candles through the exact
+same `generate_signals` / `RiskEngine` / `PaperTradingEngine` code that
+would run live -- deliberately, not a separate, faster, or simplified
+reimplementation. A backtest that scores a *fork* of the strategy/risk
+logic answers a different question than "would this actually have
+worked," and the gap between the two only shows up once real money is
+on the line. If a strategy, the Risk Engine, or the paper engine ever
+changes, this backtest changes with it automatically -- that coupling
+is the point, not a coincidence to be refactored away.
+
+No look-ahead is enforced structurally, not by convention: at simulated
+bar `i`, `detect_regime` and `generate_signals` are only ever given
+`candles[:i+1]`. Any future change to this loop that hands a strategy
+more than that -- even accidentally, even for "just checking something"
+-- would produce results that cannot happen live and should not be
+trusted.
+
+News is not backtested. There is no historical news archive (Phase 8 is
+live RSS only), so every `StrategyContext` built here gets
+`news_items=[]`, and the NEWS strategy will never fire in a backtest.
+A strategy mix that looks weak here may simply be missing the one input
+that isn't replayable yet -- don't read a backtest report as covering
+all six strategies equally.
+
+A backtest result is a starting point for judgment, not proof of a
+working strategy: it says a strategy's *rules*, applied mechanically to
+*this specific historical window*, would have produced *this* outcome.
+It says nothing about a different window, different market conditions,
+or overfitting to whichever window was chosen. Treat every number this
+produces with the same skepticism as any other unvalidated threshold in
+this project (sections 17, 19).
+
+## 24. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

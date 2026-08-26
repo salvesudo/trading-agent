@@ -47,12 +47,13 @@ def open_position(
     candidate: TradeCandidate,
     verdict: RiskVerdict,
     opened_at: dt.datetime,
+    strategy: Optional[str] = None,
 ) -> PaperPosition:
     """Open a position in the engine and persist it in the same call --
     an open position that exists in memory but not in the database (or
     vice versa) is exactly the inconsistency this module exists to
     prevent."""
-    position = engine.open_position(candidate, verdict, opened_at)
+    position = engine.open_position(candidate, verdict, opened_at, strategy=strategy)
     repository.save_new_paper_trade(session, position)
     return position
 

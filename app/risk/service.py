@@ -59,6 +59,32 @@ def build_risk_engine(session: Session, trade_date: Optional[dt.date] = None) ->
     return RiskEngine(load_account_state(session, trade_date=trade_date))
 
 
+def compute_next_account_state(current: AccountState, realized_pnl: float) -> AccountState:
+    """Pure: what AccountState should become after one more trade closes,
+    given its realized P&L. No session, no side effects.
+
+    - today_realized_pnl accumulates every trade's P&L.
+    - consecutive_losses increments on a loss, resets to 0 on a win, and
+      is left unchanged on an exact breakeven (0.0) -- a scratch trade
+      neither extends nor breaks a losing streak.
+
+    Used by both record_trade_close (DB-backed) and app/backtest/engine.py
+    (in-memory, no DB) so the same rule applies in both places rather
+    than being duplicated and risking drift between them.
+    """
+    if realized_pnl < 0:
+        new_consecutive_losses = current.consecutive_losses + 1
+    elif realized_pnl > 0:
+        new_consecutive_losses = 0
+    else:
+        new_consecutive_losses = current.consecutive_losses
+    return AccountState(
+        today_realized_pnl=current.today_realized_pnl + realized_pnl,
+        consecutive_losses=new_consecutive_losses,
+        system_healthy=current.system_healthy,
+    )
+
+
 def record_trade_close(
     session: Session,
     realized_pnl: float,
@@ -69,10 +95,7 @@ def record_trade_close(
     this same session (the caller controls the commit boundary, same
     convention as every other repository function).
 
-    - AccountState.today_realized_pnl accumulates every trade's P&L.
-    - AccountState.consecutive_losses increments on a loss, resets to 0
-      on a win, and is left unchanged on an exact breakeven (0.0) --
-      a scratch trade neither extends nor breaks a losing streak.
+    - AccountState: see compute_next_account_state.
     - CapitalLedger splits a profit 80/20 (tradable/reserved) per
       PROFIT_RESERVE_PCT; a loss comes entirely out of tradable capital
       (see app/risk/capital_ledger.py).
@@ -80,17 +103,7 @@ def record_trade_close(
     trade_date = trade_date or dt.date.today()
 
     state = load_account_state(session, trade_date=trade_date)
-    if realized_pnl < 0:
-        new_consecutive_losses = state.consecutive_losses + 1
-    elif realized_pnl > 0:
-        new_consecutive_losses = 0
-    else:
-        new_consecutive_losses = state.consecutive_losses
-    updated_state = AccountState(
-        today_realized_pnl=state.today_realized_pnl + realized_pnl,
-        consecutive_losses=new_consecutive_losses,
-        system_healthy=state.system_healthy,
-    )
+    updated_state = compute_next_account_state(state, realized_pnl)
     repository.save_account_state(session, updated_state, trade_date=trade_date)
 
     ledger = load_or_initialize_ledger(session)
@@ -104,5 +117,6 @@ __all__ = [
     "load_account_state",
     "load_or_initialize_ledger",
     "build_risk_engine",
+    "compute_next_account_state",
     "record_trade_close",
 ]

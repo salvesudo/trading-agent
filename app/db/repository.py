@@ -203,6 +203,7 @@ def _paper_position_from_row(row: PaperTradeRow) -> PaperPosition:
         exit_price=row.exit_price,
         exit_reason=ExitReason(row.exit_reason) if row.exit_reason else None,
         closed_at=_as_utc(row.closed_at) if row.closed_at else None,
+        strategy=row.strategy,
     )
 
 
@@ -226,6 +227,7 @@ def save_new_paper_trade(session: Session, position: PaperPosition) -> PaperTrad
         target=position.target,
         opened_at=position.opened_at,
         status=position.status.value,
+        strategy=position.strategy,
     )
     session.add(row)
     session.flush()
