@@ -1,0 +1,10 @@
+# Normalize line endings for text files in the repository, but let each
+# platform check them out with its own native line endings by default.
+* text=auto
+
+# Shell scripts MUST have LF line endings unconditionally, on every
+# platform, including when checked out on this project's Windows dev
+# machine -- a CRLF-terminated shebang line fails on Linux with a
+# cryptic "bad interpreter" error, and this project's scripts (e.g.
+# scripts/bootstrap_ec2.sh) exist specifically to run on Linux/EC2.
+*.sh text eol=lf

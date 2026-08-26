@@ -292,6 +292,28 @@ network access** and **no FYERS credentials**. That means:
 Each phase should be implemented, tested, and validated before the next
 begins — no skipping ahead to live execution.
 
+## Quick start on a fresh Linux machine / new EC2 instance
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/salvesudo/trading-agent/main/scripts/bootstrap_ec2.sh | bash
+```
+
+One command, run on a completely bare instance (Ubuntu/Debian or Amazon
+Linux/RHEL/Fedora) — installs git/python3/pip/venv via the system
+package manager, clones the repo, creates the venv, installs every
+Python dependency, creates `.env` from the template if one doesn't
+exist yet (never overwrites a real one), and runs `config_check` and
+the full test suite as a final "is this machine ready" signal. Safe to
+re-run any time (e.g. after a `git pull`) — every step checks whether
+it's already done first. See `scripts/bootstrap_ec2.sh`'s own header
+comment for exactly what it does and doesn't do (it can't touch AWS
+Security Groups or fill in your real FYERS credentials — those stay
+manual, deliberate steps, same reason `.env` is never auto-populated
+with real secrets anywhere in this project).
+
+If you already have the repo cloned, run the same script directly
+instead: `bash scripts/bootstrap_ec2.sh`.
+
 ## Quick start (dev machine, paper mode only)
 
 ```bash
