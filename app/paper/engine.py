@@ -81,6 +81,7 @@ class PaperTradingEngine:
             target=candidate.target,
             opened_at=opened_at,
             strategy=strategy,
+            estimated_costs=candidate.estimated_costs,
         )
         self._open[candidate.symbol] = position
         return position

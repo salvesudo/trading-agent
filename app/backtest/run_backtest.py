@@ -45,7 +45,7 @@ def _print_report(result: BacktestResult) -> None:
         f"Total trades: {result.total_trades}  Wins: {result.wins}  Losses: {result.losses}  "
         f"Win rate: {result.win_rate_pct:.1f}%"
     )
-    print(f"Total realized P&L: ₹{result.total_realized_pnl_inr:,.2f}")
+    print(f"Total realized P&L (net of est. costs): ₹{result.total_realized_pnl_inr:,.2f}")
     print()
     print("Per strategy:")
     if not result.per_strategy:
@@ -53,9 +53,12 @@ def _print_report(result: BacktestResult) -> None:
     for stats in result.per_strategy:
         print(
             f"  {stats.strategy:20s} trades={stats.trade_count:4d} "
-            f"win_rate={stats.win_rate_pct:5.1f}%  pnl=₹{stats.total_pnl_inr:,.2f}"
+            f"win_rate={stats.win_rate_pct:5.1f}%  pnl=₹{stats.total_pnl_inr:,.2f} (net)"
         )
     print("=" * 60)
+    print("All P&L above is net of estimated per-trade costs (--costs, "
+          f"₹{result.total_estimated_costs_inr:,.2f} total across {result.total_trades} trades here) -- "
+          "not just a display adjustment, this is what actually posts to the ledger now.")
     print("None of this has been backtested/calibrated before now -- see")
     print("docs/PRINCIPLES.md sections 17, 19, 22. A backtest result is a")
     print("starting point for judgment, not proof of a working strategy.")

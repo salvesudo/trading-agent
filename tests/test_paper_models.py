@@ -78,3 +78,36 @@ def test_realized_pnl_sell_loss():
     position = _position(side="SELL", entry=100.0, stop=105.0, target=90.0, qty=10)
     closed = position.close(105.0, ExitReason.STOP_LOSS, dt.datetime.now(dt.timezone.utc))
     assert closed.realized_pnl() == pytest.approx(-50.0)
+
+
+def test_realized_pnl_nets_out_estimated_costs():
+    """realized_pnl() must actually deduct estimated_costs, not just use
+    it for sizing/approval upstream -- see the method's own docstring
+    for why this was a real bug, not a style choice."""
+    position = PaperPosition(
+        symbol="RELIANCE", side="BUY", quantity=10, entry_price=100.0,
+        stop_loss=95.0, target=110.0,
+        opened_at=dt.datetime(2026, 1, 1, 9, 30, tzinfo=dt.timezone.utc),
+        estimated_costs=15.0,
+    )
+    closed = position.close(110.0, ExitReason.TARGET, dt.datetime.now(dt.timezone.utc))
+    assert closed.gross_pnl() == pytest.approx(100.0)
+    assert closed.realized_pnl() == pytest.approx(100.0 - 15.0)
+
+
+def test_estimated_costs_defaults_to_zero_for_backward_compatibility():
+    position = _position()
+    assert position.estimated_costs == 0.0
+    closed = position.close(110.0, ExitReason.TARGET, dt.datetime.now(dt.timezone.utc))
+    assert closed.realized_pnl() == closed.gross_pnl()
+
+
+def test_close_carries_estimated_costs_forward():
+    position = PaperPosition(
+        symbol="RELIANCE", side="BUY", quantity=10, entry_price=100.0,
+        stop_loss=95.0, target=110.0,
+        opened_at=dt.datetime(2026, 1, 1, 9, 30, tzinfo=dt.timezone.utc),
+        estimated_costs=15.0,
+    )
+    closed = position.close(110.0, ExitReason.TARGET, dt.datetime.now(dt.timezone.utc))
+    assert closed.estimated_costs == 15.0

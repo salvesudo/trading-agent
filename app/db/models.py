@@ -146,6 +146,7 @@ class PaperTradeRow(Base):
     exit_reason: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     closed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     strategy: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # Phase 12: per-strategy attribution
+    estimated_costs: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
 
 
 __all__ = [

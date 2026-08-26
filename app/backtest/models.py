@@ -53,5 +53,13 @@ class BacktestResult:
             return 0.0
         return (self.ending_total_equity_inr - self.starting_capital_inr) / self.starting_capital_inr * 100.0
 
+    @property
+    def total_estimated_costs_inr(self) -> float:
+        """Sum of every closed trade's own `estimated_costs` -- purely
+        informational (total_realized_pnl_inr already nets this out via
+        PaperPosition.realized_pnl(); this just shows how much of the
+        story costs are)."""
+        return sum(t.estimated_costs for t in self.trades)
+
 
 __all__ = ["StrategyStats", "BacktestResult"]

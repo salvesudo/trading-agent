@@ -287,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 24 (defense in depth). Nothing to
+("Survival > profit") and section 25 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -460,7 +460,55 @@ or overfitting to whichever window was chosen. Treat every number this
 produces with the same skepticism as any other unvalidated threshold in
 this project (sections 17, 19).
 
-## 24. Everything here is defense in depth
+## 24. What the first real-data backtest run actually found (2026-08-26)
+
+Running `app/backtest/run_backtest.py` against real FYERS candles for
+the first time (NSE:RELIANCE-EQ, then NSE:INFY-EQ, both March-May 2025,
+5-minute bars) surfaced two real bugs that months of synthetic-data
+testing never would have -- both worth recording so nobody "fixes" them
+back in later without reading why.
+
+**1. Unbounded lookback was quadratic, not a hang.** The bar loop in
+`run_backtest()` originally handed `detect_regime()`/`generate_signals()`
+the *entire* history since bar 0 (`candles[:i+1]`, growing every bar).
+Every indicator underneath rebuilds a pandas DataFrame from scratch and
+recomputes over its whole input each call, and two of them (ADX,
+Supertrend) do that with a Python-level loop rather than a vectorized
+op. Across thousands of bars that's O(n²), and a real 3-month/5-minute
+run (4425 bars) made the CLI look permanently hung with zero output.
+Fixed by bounding the window each bar sees to a trailing
+`MAX_LOOKBACK_CANDLES` (300, comfortably above every indicator's own
+minimum) -- also the more honest reading of what `detect_regime`'s own
+docstring already claimed ("recent history," not "all history since
+inception"). A progress callback was added to the CLI too, so a slow
+run is never silent again.
+
+**2. Costs were sized for, never actually deducted -- anywhere.**
+`app/risk/risk_engine.py`'s sizing/approval math treats
+`estimated_costs` as real money leaving the account (it reduces
+approved quantity and required reward:risk), but
+`PaperPosition.realized_pnl()` never actually subtracted it -- the
+capital ledger, `AccountState.today_realized_pnl`, and every backtest
+report were silently gross-of-costs. This isn't a backtest-only
+cosmetic issue: `app/paper/service.py` uses the exact same
+`realized_pnl()` for real (paper) capital tracking, so a live paper-
+trading run would have understated how much a losing day actually cost
+in the same way -- exactly the kind of optimism section 1 exists to
+prevent. Fixed by giving `PaperPosition` an `estimated_costs` field
+(threaded through from `TradeCandidate` at open, defaulting to 0.0 so
+every pre-existing caller/test is unaffected) and having
+`realized_pnl()` net it out; `gross_pnl()` still exists for anyone who
+specifically wants the pre-cost number. New migration
+`a1c7e0f2b834`.
+
+Concretely, on the INFY run this took the reported result from "-1.2%,
+roughly breakeven" to "-14.7% net of realistic costs" once 45 trades'
+worth of `--costs` were actually counted -- the same trades, the same
+market data, a materially different conclusion. Treat every number from
+before this fix (there weren't any real-data ones yet) as gross, not
+net.
+
+## 25. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

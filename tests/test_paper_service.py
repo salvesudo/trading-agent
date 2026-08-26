@@ -75,11 +75,11 @@ def test_close_position_on_target_persists_and_books_pnl(session):
     assert len(history) == 1
 
     account_state = repository.load_account_state(session, trade_date=dt.date(2026, 1, 1))
-    assert account_state.today_realized_pnl == pytest.approx((2560.0 - 2500.0) * 5)
+    expected_profit = (2560.0 - 2500.0) * 5 - 15.0  # net of the candidate's estimated_costs
+    assert account_state.today_realized_pnl == pytest.approx(expected_profit)
     assert account_state.consecutive_losses == 0
 
     ledger = repository.load_capital_ledger(session)
-    expected_profit = (2560.0 - 2500.0) * 5
     assert ledger.reserved_capital_inr == pytest.approx(expected_profit * settings.profit_reserve_pct / 100.0)
 
 
@@ -93,7 +93,7 @@ def test_close_position_on_stop_loss_increments_consecutive_losses(session):
 
     assert closed.exit_reason == ExitReason.STOP_LOSS
     account_state = repository.load_account_state(session, trade_date=dt.date(2026, 1, 1))
-    assert account_state.today_realized_pnl == pytest.approx((2480.0 - 2500.0) * 5)
+    assert account_state.today_realized_pnl == pytest.approx((2480.0 - 2500.0) * 5 - 15.0)
     assert account_state.consecutive_losses == 1
 
 
@@ -108,7 +108,7 @@ def test_close_position_manually_books_pnl_even_without_a_natural_exit(session):
     assert closed.exit_reason == ExitReason.MANUAL
     assert repository.load_open_paper_trades(session) == []
     account_state = repository.load_account_state(session, trade_date=dt.date(2026, 1, 1))
-    assert account_state.today_realized_pnl == pytest.approx((2510.0 - 2500.0) * 5)
+    assert account_state.today_realized_pnl == pytest.approx((2510.0 - 2500.0) * 5 - 15.0)
 
 
 def test_restore_open_positions_rebuilds_engine_state(session):

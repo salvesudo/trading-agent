@@ -50,6 +50,7 @@ class PaperPosition:
     exit_reason: Optional[ExitReason] = None
     closed_at: Optional[dt.datetime] = None
     strategy: Optional[str] = None  # e.g. "TREND_FOLLOWING" -- see module docstring
+    estimated_costs: float = 0.0  # from TradeCandidate.estimated_costs -- see realized_pnl()
 
     @property
     def is_open(self) -> bool:
@@ -74,17 +75,31 @@ class PaperPosition:
             entry_price=self.entry_price, stop_loss=self.stop_loss, target=self.target,
             opened_at=self.opened_at, status=PositionStatus.CLOSED,
             exit_price=exit_price, exit_reason=reason, closed_at=closed_at,
-            strategy=self.strategy,
+            strategy=self.strategy, estimated_costs=self.estimated_costs,
         )
 
-    def realized_pnl(self) -> float:
-        """P&L booked at close, ignoring costs (the Risk Engine already
-        accounted for estimated costs when sizing/approving this trade
-        -- see TradeCandidate.estimated_costs). Raises if still open,
-        since there's nothing to realize yet."""
+    def gross_pnl(self) -> float:
+        """Pure price P&L, ignoring costs entirely -- exists only so
+        callers that specifically want the pre-cost number can get it.
+        realized_pnl() below is what the ledger/risk engine actually use."""
         if self.status != PositionStatus.CLOSED or self.exit_price is None:
             raise ValueError(f"Position on {self.symbol} is still OPEN -- nothing realized yet.")
         return (self.exit_price - self.entry_price) * self._direction() * self.quantity
+
+    def realized_pnl(self) -> float:
+        """P&L booked at close, net of `estimated_costs`. Costs default
+        to 0.0 for backward compatibility (any position built before
+        this field existed, or in a test that doesn't set it, behaves
+        exactly as before). This used to ignore costs entirely on the
+        theory that "the Risk Engine already accounted for them when
+        sizing" -- true for *approval*, but the money was never actually
+        deducted anywhere: the capital ledger, today's realized P&L, and
+        every backtest report were all silently gross-of-costs. Fixed
+        because that's the number that drives real safety checks
+        (daily loss limit, protected floor) -- understating how much a
+        losing day actually cost is exactly the kind of optimism this
+        project is built to avoid (docs/PRINCIPLES.md section 1)."""
+        return self.gross_pnl() - self.estimated_costs
 
 
 __all__ = ["PositionStatus", "ExitReason", "PaperPosition"]
