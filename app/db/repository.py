@@ -22,7 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.data.models import Candle, Timeframe
-from app.db.models import AccountStateRow, CandleRow, ComplianceCheckRow, RiskEvaluationRow
+from app.db.models import AccountStateRow, CandleRow, CapitalLedgerRow, ComplianceCheckRow, RiskEvaluationRow
+from app.risk.capital_ledger import CapitalLedger
 from app.risk.risk_engine import AccountState, RiskVerdict, TradeCandidate
 from app.security.compliance import ComplianceReport
 
@@ -65,6 +66,35 @@ def save_account_state(
     row.today_realized_pnl = state.today_realized_pnl
     row.consecutive_losses = state.consecutive_losses
     row.system_healthy = state.system_healthy
+    session.flush()
+    return row
+
+
+def load_capital_ledger(session: Session) -> Optional[CapitalLedger]:
+    """Hydrate the account's CapitalLedger from its single persisted row.
+    Returns None if none exists yet -- unlike load_account_state, there's
+    no safe default to fall back to, since the caller (not this module)
+    knows what the account's actual starting capital should be
+    (app.risk.capital_ledger.initial_ledger reads that from settings)."""
+    row = session.scalar(select(CapitalLedgerRow).order_by(CapitalLedgerRow.id.desc()))
+    if row is None:
+        return None
+    return CapitalLedger(
+        protected_floor_inr=row.protected_floor_inr,
+        tradable_capital_inr=row.tradable_capital_inr,
+        reserved_capital_inr=row.reserved_capital_inr,
+    )
+
+
+def save_capital_ledger(session: Session, ledger: CapitalLedger) -> CapitalLedgerRow:
+    """Upsert the account's single CapitalLedger row."""
+    row = session.scalar(select(CapitalLedgerRow).order_by(CapitalLedgerRow.id.desc()))
+    if row is None:
+        row = CapitalLedgerRow(protected_floor_inr=ledger.protected_floor_inr)
+        session.add(row)
+    row.protected_floor_inr = ledger.protected_floor_inr
+    row.tradable_capital_inr = ledger.tradable_capital_inr
+    row.reserved_capital_inr = ledger.reserved_capital_inr
     session.flush()
     return row
 
@@ -155,6 +185,8 @@ def load_candles(
 __all__ = [
     "load_account_state",
     "save_account_state",
+    "load_capital_ledger",
+    "save_capital_ledger",
     "save_risk_evaluation",
     "save_compliance_report",
     "save_candles",

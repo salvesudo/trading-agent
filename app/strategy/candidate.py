@@ -28,7 +28,13 @@ def to_trade_candidate(
     concept. The Risk Engine's current logic (app/risk/risk_engine.py)
     doesn't actually consume this field yet either way; pass an
     explicit value once something does and confidence isn't the right
-    number for it."""
+    number for it.
+
+    `account_equity` must be `CapitalLedger.tradable_capital_inr`
+    (app/risk/capital_ledger.py), never `total_equity_inr`. Passing total
+    equity would size positions against money that's supposed to be an
+    untouchable reserve -- exactly what the ledger exists to prevent.
+    """
     return TradeCandidate(
         symbol=signal.symbol,
         side=signal.side,

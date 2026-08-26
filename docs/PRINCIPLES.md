@@ -270,7 +270,96 @@ whether the underlying signal has any real edge. That question is still
 completely open and won't be answered by anything before Phase 12
 (backtesting).
 
-## 20. Everything here is defense in depth
+## 20. Owner directives, added after Phase 9 (2026-08-26)
+
+The owner gave six additional instructions before continuing past Phase
+9. Recorded here in full so a later phase can't quietly drift from what
+was actually agreed, and so anyone reading this understands *why* each
+one is shaped the way it is.
+
+**20.1 — "The agent should be scared of getting destroyed."** Already
+the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
+`app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
+5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
+together are what this principle *is*, mechanically. See section 0
+("Survival > profit") and section 21 (defense in depth). Nothing to
+build; a reason to never loosen any of the above without the owner
+explicitly asking.
+
+**20.2 — "It should earn something every day, no matter what."** Refused
+as literally stated, and replaced with something safer after discussing
+it with the owner: **a guaranteed daily profit is not something any
+legitimate trading system can promise — markets have losing days, that's
+arithmetic, not a solvable engineering problem.** Building toward a forced
+daily win is one of the most well-documented ways retail accounts blow
+up (oversizing late in the day to force a green number, ignoring a stop
+because "today must be profitable," or quietly loosening the
+kill-switch/daily-loss-limit that exist specifically to prevent this).
+The agreed replacement: **the agent must genuinely look for a qualifying
+setup every trading day and take one if the Risk Engine approves it, but
+must be equally willing to end a day flat or red if nothing clears the
+bar.** No future phase may lower a strategy's confidence threshold, relax
+the Risk Engine, or add a "must trade by X o'clock" fallback in order to
+manufacture activity. This is already how the architecture behaves today
+— `app/strategy/engine.py::select_best_signal` returns `None` when
+nothing fires, and nothing anywhere reacts to "no signal yet" by trying
+harder — the point of this entry is to make sure it stays that way.
+
+**20.3 — 20% profit reserve, swept after every winning trade.** Built:
+`app/risk/capital_ledger.py`. After every trade that closes with
+positive P&L, `PROFIT_RESERVE_PCT` (default 20%, `.env`-configurable) of
+that profit moves into `reserved_capital_inr` and is never risked again;
+the remaining 80% joins `tradable_capital_inr` and compounds. A loss
+comes entirely out of tradable capital -- the reserve protects gains, it
+never subsidizes losses. Per the owner's choice, the reserve is an
+**untouchable buffer that stays in the account, not a withdrawal** -- it
+still counts toward `total_equity_inr` (and toward whether the account
+has breached `protected_floor_inr`), just never toward what the Risk
+Engine sizes a position against. **Any code that builds a
+`TradeCandidate` must pass `tradable_capital_inr`, never
+`total_equity_inr`, as `account_equity`** (see
+`app/strategy/candidate.py`) -- getting this backwards would silently
+let the reserve be risked again, defeating the entire mechanism.
+Persisted via `app/db/models.CapitalLedgerRow` (Phase 5's schema) but,
+like `AccountState`, not wired into a live loop yet -- becomes load-
+bearing once Phase 11 (paper trading engine) exists to call
+`apply_trade_outcome()` after every closed trade.
+
+**20.4 — "Keep earning until I ask it to stop; stop-loss always
+present."** Already the design: `STOP_TRADING=true` is the "ask it to
+stop" mechanism (section 8), and the Risk Engine already refuses any
+candidate without a valid stop-loss (section 6). This item is really
+asking for Phase 11's continuous loop to exist and run indefinitely,
+respecting the kill switch -- nothing new to decide now, just confirming
+the eventual loop must not add any other implicit stopping condition
+(like a target profit that halts trading) unless the owner asks for one.
+
+**20.5 — Long-term/positional holds for high-conviction stocks.**
+Deferred by the owner's own choice: with only ₹5,000 total starting
+capital, carving out a separate bucket for multi-day/weekly holds right
+now would come directly out of the already-thin intraday risk budget.
+**No capital split exists, and none should be added, until the account
+has grown meaningfully beyond the starting capital and the owner
+explicitly revisits this.** When it is revisited, it is a materially
+different strategy than anything in `app/strategy/` today (overnight/gap
+risk, a different product type than `INTRADAY`, a much higher conviction
+bar than any of the six existing strategies use) -- treat it as new work
+requiring its own design pass, not a small extension of Phase 9.
+
+**20.6 — "Agent should invent its own best strategies from market
+studies and world situations."** Refused as an autonomous, guaranteed-
+profitable strategy generator -- no system, including a hedge fund's,
+can honestly promise that. Scoped down, with the owner's agreement, to
+exactly what Phase 13 already specifies: an **advisory-only** LLM layer
+that can add macro/global-event context as one more input the strategy
+engine considers. It never overrides the Risk Engine (spec section 47),
+and nothing it produces gets trusted with real money until it's been
+backtested (Phase 12) against actual historical data, same as every
+other strategy. Building this is still future work (Phase 12 and 13
+haven't started); this entry exists so the scope is agreed *before*
+either phase is built, not decided under pressure while writing them.
+
+## 21. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

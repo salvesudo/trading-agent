@@ -43,6 +43,24 @@ class AccountStateRow(Base):
     )
 
 
+class CapitalLedgerRow(Base):
+    """Persisted app.risk.capital_ledger.CapitalLedger -- the
+    owner-directed profit-reserve policy added after Phase 9. Single row
+    per account (there's only ever one live ledger, unlike
+    AccountStateRow which is one-per-day) -- see
+    app/db/repository.py::load_capital_ledger / save_capital_ledger."""
+
+    __tablename__ = "capital_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    protected_floor_inr: Mapped[float] = mapped_column(Float, nullable=False)
+    tradable_capital_inr: Mapped[float] = mapped_column(Float, nullable=False)
+    reserved_capital_inr: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
 class RiskEvaluationRow(Base):
     """Audit log of every Risk Engine evaluation, approved or rejected.
     Written regardless of outcome -- a rejection is as important to have
@@ -105,4 +123,4 @@ class CandleRow(Base):
     volume: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
-__all__ = ["AccountStateRow", "RiskEvaluationRow", "ComplianceCheckRow", "CandleRow"]
+__all__ = ["AccountStateRow", "CapitalLedgerRow", "RiskEvaluationRow", "ComplianceCheckRow", "CandleRow"]

@@ -207,6 +207,46 @@ max_loss=₹45.00 (0.90% of equity)`. This confirms Phases 1, 4, 6, 7, 8,
 and 9 genuinely compose, not just that each passes its own tests in
 isolation.
 
+## Owner directives added after Phase 9 (2026-08-26)
+
+Before continuing, the owner gave six additional instructions. Full
+reasoning and exact wording are in `docs/PRINCIPLES.md` section 20 — the
+short version:
+
+1. **"Scared of getting destroyed"** — already the design (1% max
+   risk/trade, 2% max daily loss, 5-consecutive-loss halt, kill switch).
+2. **"Earn something every day, no matter what"** — refused as literally
+   stated (no legitimate system can guarantee a daily profit; trying to
+   force one is a well-known way retail accounts blow up) and replaced
+   with: look for a qualifying setup every day, take one if the Risk
+   Engine approves it, but end the day flat/red without hesitation if
+   nothing clears the bar. No future phase may lower a threshold just to
+   manufacture activity.
+3. **20% profit reserve after every winning trade** — built:
+   `app/risk/capital_ledger.py` + `app/db/models.CapitalLedgerRow`.
+   Splits each win 80/20 (tradable/reserved); a loss comes entirely out
+   of tradable capital. The reserve is an untouchable buffer that stays
+   in the account (not a withdrawal) — it counts toward total equity but
+   never toward what the Risk Engine sizes a position against.
+4. **Keep running until told to stop, stop-loss always present** —
+   already the design (`STOP_TRADING`, the Risk Engine's mandatory-stop
+   check); just confirms the eventual Phase 11 loop shouldn't add any
+   other implicit stopping condition.
+5. **Long-term/positional holds** — deferred by the owner's own choice
+   until capital has grown meaningfully beyond ₹5,000; no capital split
+   exists or should be added yet.
+6. **"Agent invents its own best strategies from world situations"** —
+   scoped down to Phase 13's existing plan: an advisory-only LLM layer
+   feeding the strategy engine, never overriding the Risk Engine, never
+   trusted without backtesting first (Phase 12).
+
+Only #3 involved new code this pass — 15 new tests (212 total), plus a
+new Alembic migration (`57d0d6d5fc60_add_capital_ledger_table.py`),
+generated and verified (upgrade **and** downgrade, both a single-step and
+full-stack) against a throwaway local SQLite database the same way the
+initial schema was. `CapitalLedger` is not wired into a live loop yet —
+same status as `AccountState` (see the Phase 5 note above).
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -430,7 +470,9 @@ context = StrategyContext(
 signals = generate_signals(context)          # every strategy that fired
 best = select_best_signal(signals)            # highest confidence -- a placeholder, not real arbitration
 if best:
-    candidate = to_trade_candidate(best, account_equity=5000.0, estimated_costs=15.0)
+    # account_equity must be tradable_capital_inr, never total_equity_inr
+    # -- see "Capital reserve" below.
+    candidate = to_trade_candidate(best, account_equity=ledger.tradable_capital_inr, estimated_costs=15.0)
     verdict = RiskEngine().evaluate(candidate)  # final authority, always
     print(verdict.decision, verdict.reason)
 ```
@@ -441,3 +483,29 @@ backtested or calibrated — explicit starting rules, not a claim of edge
 pipeline ran here with real live news and synthetic candles, producing a
 real `RiskEngine` `APPROVE` — see the Phase 9 status note above for the
 full result.
+
+## Capital reserve (added after Phase 9)
+
+```python
+from app.risk.capital_ledger import initial_ledger
+
+ledger = initial_ledger()  # tradable=INITIAL_CAPITAL_INR, reserved=0.0, floor=PROTECTED_CAPITAL_INR
+
+# After a trade closes (win or loss), update the ledger:
+ledger = ledger.apply_trade_outcome(realized_pnl=120.0)  # +120 profit -> +96 tradable, +24 reserved (20%)
+print(ledger.tradable_capital_inr, ledger.reserved_capital_inr, ledger.total_equity_inr)
+
+# Persisting it (Phase 5's DB):
+from app.db.base import build_sessionmaker
+from app.db import repository
+
+Session = build_sessionmaker()
+with Session() as session:
+    repository.save_capital_ledger(session, ledger)
+    session.commit()
+```
+
+`PROFIT_RESERVE_PCT` in `.env` controls the split (default 20). Always
+pass `ledger.tradable_capital_inr` — never `total_equity_inr` — as a
+`TradeCandidate`'s `account_equity`. Not wired into a live loop yet; see
+the owner-directives note above.

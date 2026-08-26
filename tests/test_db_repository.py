@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.data.models import Candle, Timeframe
 from app.db import repository
 from app.db.base import Base
+from app.risk.capital_ledger import CapitalLedger
 from app.risk.risk_engine import AccountState, RiskDecision, RiskVerdict, TradeCandidate
 from app.security.compliance import CheckResult, ComplianceReport
 
@@ -56,6 +57,37 @@ def test_load_account_state_is_scoped_to_trade_date(session):
     repository.save_account_state(session, AccountState(consecutive_losses=5), trade_date=dt.date(2026, 1, 1))
     other_day = repository.load_account_state(session, trade_date=dt.date(2026, 1, 2))
     assert other_day == AccountState()  # unaffected by the other day's row
+
+
+def test_load_capital_ledger_returns_none_when_no_row_exists(session):
+    assert repository.load_capital_ledger(session) is None
+
+
+def test_save_and_load_capital_ledger_round_trips(session):
+    ledger = CapitalLedger(protected_floor_inr=5000.0, tradable_capital_inr=5200.0, reserved_capital_inr=150.0)
+    repository.save_capital_ledger(session, ledger)
+
+    loaded = repository.load_capital_ledger(session)
+    assert loaded == ledger
+
+
+def test_save_capital_ledger_upserts_the_single_row():
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(bind=engine)
+    with Session(engine, future=True, expire_on_commit=False) as s:
+        repository.save_capital_ledger(s, CapitalLedger(protected_floor_inr=5000.0, tradable_capital_inr=5000.0))
+        repository.save_capital_ledger(
+            s, CapitalLedger(protected_floor_inr=5000.0, tradable_capital_inr=5080.0, reserved_capital_inr=20.0)
+        )
+        s.commit()
+
+        from sqlalchemy import select
+        from app.db.models import CapitalLedgerRow
+
+        rows = s.scalars(select(CapitalLedgerRow)).all()
+        assert len(rows) == 1
+        assert rows[0].tradable_capital_inr == 5080.0
+        assert rows[0].reserved_capital_inr == 20.0
 
 
 def test_save_risk_evaluation_persists_candidate_and_verdict(session):

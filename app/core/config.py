@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     consecutive_loss_soft_limit: int = Field(default=3, alias="CONSECUTIVE_LOSS_SOFT_LIMIT")
     consecutive_loss_hard_limit: int = Field(default=5, alias="CONSECUTIVE_LOSS_HARD_LIMIT")
 
+    # Owner-directed profit-reserve policy (added after Phase 9): after
+    # every trade that closes in profit, this percentage of that profit
+    # is swept into an untouchable reserve (app/risk/capital_ledger.py)
+    # that is never risked again. Losses are unaffected -- the reserve
+    # protects gains, it doesn't subsidize losses.
+    profit_reserve_pct: float = Field(default=20.0, alias="PROFIT_RESERVE_PCT")
+
     # --- Database ---
     database_url: str = Field(default="", alias="DATABASE_URL")
     redis_url: str = Field(default="", alias="REDIS_URL")
@@ -91,6 +98,15 @@ class Settings(BaseSettings):
                 f"MAX_DAILY_LOSS_PCT={v} exceeds the 2% recommended ceiling. "
                 "Refusing to start -- lower it in .env if this is intentional "
                 "and you understand the increased risk."
+            )
+        return v
+
+    @field_validator("profit_reserve_pct")
+    @classmethod
+    def _validate_profit_reserve_pct(cls, v: float) -> float:
+        if not (0.0 <= v <= 100.0):
+            raise ValueError(
+                f"PROFIT_RESERVE_PCT={v} must be between 0 and 100. Refusing to start."
             )
         return v
 
