@@ -12,6 +12,7 @@ classes directly.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Optional
 
 from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -123,4 +124,34 @@ class CandleRow(Base):
     volume: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
-__all__ = ["AccountStateRow", "CapitalLedgerRow", "RiskEvaluationRow", "ComplianceCheckRow", "CandleRow"]
+class PaperTradeRow(Base):
+    """Persisted app.paper.models.PaperPosition -- Phase 11. One row per
+    position's entire lifetime, updated in place from OPEN to CLOSED
+    (not append-only) -- matches how app/paper/engine.py enforces at
+    most one open position per symbol at a time. See
+    app/db/repository.py::save_new_paper_trade / save_paper_trade_close."""
+
+    __tablename__ = "paper_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    target: Mapped[float] = mapped_column(Float, nullable=False)
+    opened_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="OPEN", index=True)
+    exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    closed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+__all__ = [
+    "AccountStateRow",
+    "CapitalLedgerRow",
+    "RiskEvaluationRow",
+    "ComplianceCheckRow",
+    "CandleRow",
+    "PaperTradeRow",
+]

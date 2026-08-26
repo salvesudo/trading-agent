@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.data.models import Candle, Timeframe
 from app.db import repository
 from app.db.base import Base
+from app.paper.models import ExitReason, PaperPosition
 from app.risk.capital_ledger import CapitalLedger
 from app.risk.risk_engine import AccountState, RiskDecision, RiskVerdict, TradeCandidate
 from app.security.compliance import CheckResult, ComplianceReport
@@ -179,3 +180,60 @@ def test_candles_are_scoped_by_symbol_and_timeframe(session):
     assert len(repository.load_candles(session, "NSE:RELIANCE-EQ", Timeframe.ONE_MINUTE)) == 1
     assert len(repository.load_candles(session, "NSE:TCS-EQ", Timeframe.ONE_MINUTE)) == 1
     assert len(repository.load_candles(session, "NSE:RELIANCE-EQ", Timeframe.FIVE_MINUTES)) == 1
+
+
+def _open_position(symbol="RELIANCE", side="BUY", opened_at=None):
+    return PaperPosition(
+        symbol=symbol, side=side, quantity=5, entry_price=2500.0, stop_loss=2480.0, target=2560.0,
+        opened_at=opened_at or dt.datetime(2026, 1, 1, 9, 30, tzinfo=dt.timezone.utc),
+    )
+
+
+def test_save_new_paper_trade_and_load_open(session):
+    position = _open_position()
+    repository.save_new_paper_trade(session, position)
+
+    open_positions = repository.load_open_paper_trades(session)
+    assert len(open_positions) == 1
+    assert open_positions[0].symbol == "RELIANCE"
+    assert open_positions[0].is_open
+
+
+def test_save_new_paper_trade_rejects_duplicate_open_symbol(session):
+    repository.save_new_paper_trade(session, _open_position())
+    with pytest.raises(ValueError):
+        repository.save_new_paper_trade(session, _open_position())
+
+
+def test_save_paper_trade_close_updates_the_open_row(session):
+    position = _open_position()
+    repository.save_new_paper_trade(session, position)
+
+    closed = position.close(2560.0, ExitReason.TARGET, dt.datetime(2026, 1, 1, 11, 0, tzinfo=dt.timezone.utc))
+    repository.save_paper_trade_close(session, "RELIANCE", closed)
+
+    assert repository.load_open_paper_trades(session) == []
+    history = repository.load_paper_trade_history(session)
+    assert len(history) == 1
+    assert history[0].exit_reason == ExitReason.TARGET
+    assert history[0].exit_price == 2560.0
+    assert history[0].realized_pnl() == pytest.approx((2560.0 - 2500.0) * 5)
+
+
+def test_save_paper_trade_close_raises_when_nothing_open(session):
+    position = _open_position()
+    closed = position.close(2560.0, ExitReason.TARGET, dt.datetime.now(dt.timezone.utc))
+    with pytest.raises(ValueError):
+        repository.save_paper_trade_close(session, "RELIANCE", closed)
+
+
+def test_load_paper_trade_history_scoped_by_symbol_and_limit(session):
+    for symbol in ("RELIANCE", "TCS", "RELIANCE"):
+        position = _open_position(symbol=symbol)
+        repository.save_new_paper_trade(session, position)
+        closed = position.close(2560.0, ExitReason.TARGET, dt.datetime.now(dt.timezone.utc))
+        repository.save_paper_trade_close(session, symbol, closed)
+
+    assert len(repository.load_paper_trade_history(session)) == 3
+    assert len(repository.load_paper_trade_history(session, symbol="RELIANCE")) == 2
+    assert len(repository.load_paper_trade_history(session, limit=1)) == 1

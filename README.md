@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 10 — Risk Engine (DB-wired)
+## Status: Phase 11 — Paper Trading Engine
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -271,6 +271,46 @@ there's an actual persistent loop accumulating it across trades in a
 day — that's still Phase 11's job. Phase 10 finished the plumbing;
 Phase 11 is expected to turn the tap on.
 
+Phase 11 adds `app/paper/`: a position-lifecycle state machine
+(`app/paper/engine.py`) that tracks a simulated (never real — it never
+touches `app/broker/client.py`) fill from open to close, and
+`app/paper/service.py` tying it to persistence and Phase 10's risk
+service so a closed paper trade can never exist in the position ledger
+without also being booked against `AccountState`/`CapitalLedger`, or
+vice versa. New DB table `paper_trades` (migration
+`2f28948d104a_add_paper_trades_table.py`, generated and verified upgrade
+**and** downgrade against a throwaway SQLite DB, same as every migration
+before it).
+
+Two new portfolio-level controls the Risk Engine itself has no way to
+see, since it only ever evaluates one candidate in isolation:
+`MAX_CONCURRENT_POSITIONS` (default 3) and one open position per symbol
+at a time — both enforced by the engine, not the Risk Engine. Positions
+are force-closed at `INTRADAY_SQUARE_OFF_TIME` (default 15:15 IST)
+regardless of stop/target — this system holds nothing overnight, per
+the owner's own deferral of long-term holds (`docs/PRINCIPLES.md`
+section 20.5). Exit price is always whatever price was actually observed
+when an exit condition was detected, never the idealized stop/target
+level — no slippage model beyond that, and deliberately not pretending
+a real fill lands exactly on the nominal price.
+
+A real bug surfaced by this phase's own tests, not a hypothetical:
+`close_position`'s default `trade_date` originally fell through to
+`dt.date.today()` — the actual real-world date — rather than being
+derived from `current_time`. For a backtested or simulated timestamp,
+that would have silently booked a trade's P&L against the wrong day's
+`AccountState` row. Fixed to derive the trading day from `current_time`
+(converted to IST, the same day-boundary convention `indicators.vwap()`
+already established) unless a caller explicitly overrides it.
+
+39 new tests (263 total). **Still true after this phase: nothing runs
+continuously.** Every test drives the engine and service layer with
+explicit price updates and timestamps — there is still no scheduler
+polling live market data during market hours. That orchestration (tying
+Phase 4's live WebSocket stream, the Strategy Engine, and this phase's
+`open_position`/`close_position` into an actual running loop) is the
+next increment, not yet built.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -298,10 +338,11 @@ network access** and **no FYERS credentials**. That means:
 7. **Market regime detection** ✅
 8. **News/sentiment engine** ✅
 9. **Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)** ✅
-10. **Risk engine** ✅ ← you are here (skeleton was included back in Phase 1,
-    since it has veto power over every later phase; this phase wired it
-    to the database and capital ledger)
-11. Paper trading engine
+10. **Risk engine** ✅ (skeleton was included back in Phase 1, since it
+    has veto power over every later phase; this phase wired it to the
+    database and capital ledger)
+11. **Paper trading engine** ✅ ← you are here (position lifecycle +
+    persistence; no live scheduler loop yet)
 12. Backtesting engine
 13. AI decision engine (LLM layer, advisory only)
 14. Execution engine
@@ -556,3 +597,55 @@ with Session() as session:
 pass `ledger.tradable_capital_inr` — never `total_equity_inr` — as a
 `TradeCandidate`'s `account_equity`. Not wired into a live loop yet; see
 the owner-directives note above.
+
+## Risk service (Phase 10)
+
+```python
+from app.db.base import build_sessionmaker
+from app.risk import service as risk_service
+
+Session = build_sessionmaker()
+with Session() as session:
+    engine = risk_service.build_risk_engine(session)      # real, DB-backed AccountState
+    verdict = engine.evaluate(candidate)                   # candidate from Phase 9
+    if verdict.decision.value == "APPROVE":
+        ...  # open the position (see Phase 11 below), then once it closes:
+    state, ledger = risk_service.record_trade_close(session, realized_pnl=45.0)
+    session.commit()
+```
+
+`record_trade_close` updates `AccountState` (today's P&L, consecutive-
+loss streak) and `CapitalLedger` (the profit sweep) together, in one
+session — the two can never be persisted out of sync with each other.
+Not called automatically by anything yet.
+
+## Paper trading engine (Phase 11)
+
+```python
+from datetime import datetime, timezone
+from app.paper.engine import PaperTradingEngine
+from app.paper import service as paper_service
+
+engine = PaperTradingEngine()
+
+# Once the Risk Engine approves a candidate (Phase 9 + 10):
+with Session() as session:
+    position = paper_service.open_position(session, engine, candidate, verdict, opened_at=datetime.now(timezone.utc))
+    session.commit()
+
+    # On each new price update for that symbol (from Phase 4's live feed):
+    closed = paper_service.close_position(session, engine, "NSE:RELIANCE-EQ", price=2565.0, current_time=datetime.now(timezone.utc))
+    if closed:
+        session.commit()   # persisted the close AND booked P&L against AccountState/CapitalLedger
+
+# After a restart, rebuild in-memory state from the database:
+paper_service.restore_open_positions(session, engine)
+```
+
+Simulated fills only — never touches `app/broker/client.py`, whose own
+`TRADING_MODE=LIVE` guard is a separate, independent check regardless.
+Enforces `MAX_CONCURRENT_POSITIONS` and one position per symbol; force-
+closes at `INTRADAY_SQUARE_OFF_TIME` (default 15:15 IST) since this
+system holds nothing overnight. **No live scheduler yet** — every call
+above needs an explicit price/timestamp; nothing polls the market on
+its own.

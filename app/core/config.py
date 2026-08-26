@@ -61,6 +61,22 @@ class Settings(BaseSettings):
     # protects gains, it doesn't subsidize losses.
     profit_reserve_pct: float = Field(default=20.0, alias="PROFIT_RESERVE_PCT")
 
+    # --- Paper trading engine (Phase 11) ---
+    # Portfolio-level exposure cap: the Risk Engine only ever evaluates
+    # one candidate at a time and has no notion of "how many other
+    # positions are already open" -- this is that missing portfolio-level
+    # control, enforced by app/paper/engine.py, not the Risk Engine
+    # itself. A defensible starting number, not calibrated (see
+    # docs/PRINCIPLES.md on unvalidated thresholds).
+    max_concurrent_positions: int = Field(default=3, alias="MAX_CONCURRENT_POSITIONS")
+    # Intraday positions are force-closed at this time of day (IST,
+    # "HH:MM", 24-hour) regardless of stop/target -- this system holds
+    # nothing overnight (see docs/PRINCIPLES.md section 20.5: long-term
+    # holds are explicitly deferred). Defaults to 15 minutes before NSE's
+    # 15:30 IST close, a common practical buffer against last-minute
+    # liquidity/volatility, not a number FYERS or NSE requires.
+    intraday_square_off_time: str = Field(default="15:15", alias="INTRADAY_SQUARE_OFF_TIME")
+
     # --- Database ---
     database_url: str = Field(default="", alias="DATABASE_URL")
     redis_url: str = Field(default="", alias="REDIS_URL")
@@ -108,6 +124,29 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"PROFIT_RESERVE_PCT={v} must be between 0 and 100. Refusing to start."
             )
+        return v
+
+    @field_validator("max_concurrent_positions")
+    @classmethod
+    def _validate_max_concurrent_positions(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(
+                f"MAX_CONCURRENT_POSITIONS={v} must be at least 1. Refusing to start."
+            )
+        return v
+
+    @field_validator("intraday_square_off_time")
+    @classmethod
+    def _validate_intraday_square_off_time(cls, v: str) -> str:
+        import datetime as _dt
+
+        try:
+            _dt.datetime.strptime(v, "%H:%M")
+        except ValueError:
+            raise ValueError(
+                f"INTRADAY_SQUARE_OFF_TIME={v!r} must be 24-hour 'HH:MM' (e.g. '15:15'). "
+                "Refusing to start."
+            ) from None
         return v
 
     @model_validator(mode="after")

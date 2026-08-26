@@ -22,7 +22,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.data.models import Candle, Timeframe
-from app.db.models import AccountStateRow, CandleRow, CapitalLedgerRow, ComplianceCheckRow, RiskEvaluationRow
+from app.db.models import (
+    AccountStateRow,
+    CandleRow,
+    CapitalLedgerRow,
+    ComplianceCheckRow,
+    PaperTradeRow,
+    RiskEvaluationRow,
+)
+from app.paper.models import ExitReason, PaperPosition, PositionStatus
 from app.risk.capital_ledger import CapitalLedger
 from app.risk.risk_engine import AccountState, RiskVerdict, TradeCandidate
 from app.security.compliance import ComplianceReport
@@ -182,6 +190,87 @@ def load_candles(
     ]
 
 
+def _paper_position_from_row(row: PaperTradeRow) -> PaperPosition:
+    return PaperPosition(
+        symbol=row.symbol,
+        side=row.side,
+        quantity=row.quantity,
+        entry_price=row.entry_price,
+        stop_loss=row.stop_loss,
+        target=row.target,
+        opened_at=_as_utc(row.opened_at),
+        status=PositionStatus(row.status),
+        exit_price=row.exit_price,
+        exit_reason=ExitReason(row.exit_reason) if row.exit_reason else None,
+        closed_at=_as_utc(row.closed_at) if row.closed_at else None,
+    )
+
+
+def save_new_paper_trade(session: Session, position: PaperPosition) -> PaperTradeRow:
+    """Insert a new row for a just-opened position. Raises via a
+    UNIQUE-ish app-level check if this symbol already has an OPEN row --
+    app/paper/engine.py already prevents this in memory; this is a
+    second, independent check at the persistence boundary (defense in
+    depth, same pattern used throughout this project)."""
+    existing_open = session.scalar(
+        select(PaperTradeRow).where(PaperTradeRow.symbol == position.symbol, PaperTradeRow.status == "OPEN")
+    )
+    if existing_open is not None:
+        raise ValueError(f"{position.symbol} already has an OPEN paper trade row (id={existing_open.id}).")
+    row = PaperTradeRow(
+        symbol=position.symbol,
+        side=position.side,
+        quantity=position.quantity,
+        entry_price=position.entry_price,
+        stop_loss=position.stop_loss,
+        target=position.target,
+        opened_at=position.opened_at,
+        status=position.status.value,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def save_paper_trade_close(session: Session, symbol: str, closed_position: PaperPosition) -> PaperTradeRow:
+    """Update the OPEN row for `symbol` to reflect a close. Raises if
+    there's no OPEN row to close -- a close with nothing to close
+    against is a real inconsistency, not something to silently ignore."""
+    if closed_position.status != PositionStatus.CLOSED:
+        raise ValueError("save_paper_trade_close expects an already-closed PaperPosition.")
+    row = session.scalar(select(PaperTradeRow).where(PaperTradeRow.symbol == symbol, PaperTradeRow.status == "OPEN"))
+    if row is None:
+        raise ValueError(f"No OPEN paper trade row found for {symbol} to close.")
+    row.status = PositionStatus.CLOSED.value
+    row.exit_price = closed_position.exit_price
+    row.exit_reason = closed_position.exit_reason.value if closed_position.exit_reason else None
+    row.closed_at = closed_position.closed_at
+    session.flush()
+    return row
+
+
+def load_open_paper_trades(session: Session) -> List[PaperPosition]:
+    """All currently OPEN positions -- e.g. to rebuild
+    app/paper/engine.py::PaperTradingEngine's in-memory state after a
+    restart."""
+    rows = session.scalars(select(PaperTradeRow).where(PaperTradeRow.status == "OPEN")).all()
+    return [_paper_position_from_row(r) for r in rows]
+
+
+def load_paper_trade_history(
+    session: Session, symbol: Optional[str] = None, limit: Optional[int] = None
+) -> List[PaperPosition]:
+    """Closed positions, most recently closed first."""
+    stmt = select(PaperTradeRow).where(PaperTradeRow.status == "CLOSED")
+    if symbol is not None:
+        stmt = stmt.where(PaperTradeRow.symbol == symbol)
+    stmt = stmt.order_by(PaperTradeRow.closed_at.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    rows = session.scalars(stmt).all()
+    return [_paper_position_from_row(r) for r in rows]
+
+
 __all__ = [
     "load_account_state",
     "save_account_state",
@@ -191,4 +280,8 @@ __all__ = [
     "save_compliance_report",
     "save_candles",
     "load_candles",
+    "save_new_paper_trade",
+    "save_paper_trade_close",
+    "load_open_paper_trades",
+    "load_paper_trade_history",
 ]

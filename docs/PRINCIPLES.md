@@ -287,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 22 (defense in depth). Nothing to
+("Survival > profit") and section 23 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -385,7 +385,48 @@ matter once real trades start closing at exactly zero.
 Still true after this phase: nothing calls any of this automatically.
 See section 15.
 
-## 22. Everything here is defense in depth
+## 22. Simulated fills stay simulated, and someone still has to press "go" (Phase 11)
+
+`app/paper/engine.py` never imports anything from `app/broker/client.py`'s
+order-placement methods -- there is no code path from a `PaperPosition`
+to a real order, by construction, not just by the
+`TRADING_MODE=LIVE` guard (section 12) that would also stop it. A
+`PaperPosition` is a bookkeeping fiction that exists so the Risk
+Engine's approvals have somewhere to be tracked to a close.
+
+Two portfolio-level controls live here, not in the Risk Engine:
+`MAX_CONCURRENT_POSITIONS` and one open position per symbol. The Risk
+Engine evaluates exactly one candidate at a time and has no way to know
+what else is already open -- these exist specifically to fill that gap,
+and like every other threshold in this project (regime cutoffs, Phase 9
+strategy parameters), the default of 3 concurrent positions is a
+starting point, not calibrated against real outcomes.
+
+Exit price is always the price actually observed when an exit condition
+fired, never the idealized stop/target level -- a real fill can be
+worse in a fast-moving market, and pretending otherwise would make
+paper results look better than live ones ever will.
+
+`app/paper/service.py::close_position` derives its trading day from
+`current_time` (converted to IST), never from `dt.date.today()` --
+getting this backwards was an actual bug caught by this phase's own
+tests, not a hypothetical: a backtested or simulated timestamp would
+otherwise have silently booked P&L against whatever the real-world date
+happened to be when the test ran, not the date the trade actually
+belongs to. Any future code that touches trade dates should default the
+same way.
+
+Everything built in Phases 1-11 is now a complete, tested set of parts:
+market data, indicators, regime, news, six strategies, the Risk Engine,
+capital ledger, and a position lifecycle. None of it runs on its own.
+There is still no scheduler, no loop polling live prices during market
+hours, nothing deciding when to call `generate_signals` or
+`process_price_update`. Wiring that loop together is real, remaining
+work -- don't describe Phase 11 as "the agent can trade now." It can't,
+yet; it can be driven, one explicit call at a time, to prove every piece
+behaves correctly.
+
+## 23. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),
