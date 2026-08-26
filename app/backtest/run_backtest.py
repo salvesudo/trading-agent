@@ -27,6 +27,37 @@ from app.data.history import fetch_candles
 from app.data.models import Timeframe
 
 
+def _print_trade_log(result: BacktestResult, strategy_filter: str | None) -> None:
+    trades = result.trades
+    if strategy_filter:
+        trades = [t for t in trades if (t.strategy or "UNKNOWN") == strategy_filter]
+    print("=" * 60)
+    print(f"TRADE LOG{f' ({strategy_filter} only)' if strategy_filter else ''}: {len(trades)} trade(s)")
+    print("=" * 60)
+    if not trades:
+        print("  (no trades match)")
+        return
+    for t in trades:
+        direction = "up" if t.side == "BUY" else "down"
+        stop_dist = abs(t.entry_price - t.stop_loss)
+        target_dist = abs(t.target - t.entry_price)
+        print(
+            f"  [{t.strategy or 'UNKNOWN':16s}] {t.side:4s} qty={t.quantity:3d}  "
+            f"entry={t.entry_price:9.2f} @ {t.opened_at.isoformat()}"
+        )
+        print(
+            f"    stop={t.stop_loss:9.2f} (dist {stop_dist:6.2f})  "
+            f"target={t.target:9.2f} (dist {target_dist:6.2f})  "
+            f"[R:R {target_dist / stop_dist:.2f}]" if stop_dist else "    stop dist is zero"
+        )
+        print(
+            f"    exit={t.exit_price:9.2f} @ {t.closed_at.isoformat()}  "
+            f"reason={t.exit_reason.value if t.exit_reason else '?':13s}  "
+            f"gross=₹{t.gross_pnl():8.2f}  net=₹{t.realized_pnl():8.2f}"
+        )
+    print("=" * 60)
+
+
 def _print_report(result: BacktestResult) -> None:
     print("=" * 60)
     print(f"BACKTEST REPORT: {result.symbol}")
@@ -85,6 +116,15 @@ def main() -> None:
         default=MAX_LOOKBACK_CANDLES,
         help="Trailing candles shown to regime/strategy detection each bar (bounded window, not full history)",
     )
+    parser.add_argument(
+        "--show-trades",
+        nargs="?",
+        const="ALL",
+        default=None,
+        metavar="STRATEGY",
+        help="Print every closed trade's entry/exit detail. Optionally pass a strategy name "
+        "(e.g. TREND_FOLLOWING) to only show that strategy's trades.",
+    )
     args = parser.parse_args()
 
     try:
@@ -105,6 +145,9 @@ def main() -> None:
             on_progress=_report_progress,
         )
         _print_report(result)
+        if args.show_trades is not None:
+            strategy_filter = None if args.show_trades == "ALL" else args.show_trades
+            _print_trade_log(result, strategy_filter)
     except (BrokerError, InsufficientDataError) as exc:
         print(f"\n❌ {exc}")
         raise SystemExit(1) from None
