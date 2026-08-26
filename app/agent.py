@@ -6,6 +6,7 @@ paper fills, and broker execution will be connected in later phases.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from app.core.config import TradingMode, settings
 from app.risk.risk_engine import (
@@ -15,6 +16,9 @@ from app.risk.risk_engine import (
     RiskVerdict,
     TradeCandidate,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass(frozen=True)
@@ -48,13 +52,27 @@ class TradingAgent:
         return False
 
 
-def build_paper_agent(account_state: AccountState | None = None) -> TradingAgent:
-    """Build the only supported agent mode in the project foundation."""
+def build_paper_agent(
+    account_state: AccountState | None = None,
+    session: "Session | None" = None,
+) -> TradingAgent:
+    """Build the only supported agent mode in the project foundation.
+
+    If `session` is given and `account_state` isn't, real AccountState is
+    loaded from the database (app/risk/service.py, Phase 10) instead of
+    falling back to AccountState()'s Phase-1 placeholder defaults. An
+    explicit `account_state` always wins over `session` -- this is
+    additive, not a change to the existing default (no-DB) behavior.
+    """
     if settings.trading_mode != TradingMode.PAPER:
         raise RuntimeError(
             "Execution is not implemented yet. Keep TRADING_MODE=PAPER "
             "until the execution phase is complete."
         )
+    if account_state is None and session is not None:
+        from app.risk.service import load_account_state
+
+        account_state = load_account_state(session)
     return TradingAgent(account_state)
 
 

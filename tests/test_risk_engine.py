@@ -111,3 +111,37 @@ def test_agent_returns_risk_decision_without_submitting_order():
 
 def test_paper_agent_factory_returns_agent():
     assert isinstance(build_paper_agent(), TradingAgent)
+
+
+def test_paper_agent_factory_loads_real_account_state_when_session_given():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as OrmSession
+
+    from app.db.base import Base
+    from app.db import repository
+
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(bind=engine)
+    with OrmSession(engine, future=True, expire_on_commit=False) as session:
+        repository.save_account_state(session, AccountState(consecutive_losses=5))
+
+        agent = build_paper_agent(session=session)
+        verdict = agent.risk_engine.evaluate(make_trade())
+        assert verdict.decision == RiskDecision.REJECT_CONSECUTIVE_LOSSES
+
+
+def test_paper_agent_factory_explicit_account_state_wins_over_session():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as OrmSession
+
+    from app.db.base import Base
+    from app.db import repository
+
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(bind=engine)
+    with OrmSession(engine, future=True, expire_on_commit=False) as session:
+        repository.save_account_state(session, AccountState(consecutive_losses=5))
+
+        agent = build_paper_agent(account_state=AccountState(), session=session)
+        verdict = agent.risk_engine.evaluate(make_trade())
+        assert verdict.decision == RiskDecision.APPROVE

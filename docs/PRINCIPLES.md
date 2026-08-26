@@ -180,18 +180,23 @@ cumulative field, every candle would report the full day's volume
 instead of its own, and nothing about that would look obviously wrong
 in a quick glance at the numbers.
 
-## 15. The database exists; the agent loop doesn't read from it yet (Phase 5)
+## 15. The database exists; nothing reads from it *automatically* yet (Phase 5, wired in Phase 10)
 
-`app/db/repository.py` can load and save `AccountState`, but nothing
-calls `load_account_state` automatically before a Risk Engine evaluation
--- `app/agent.py` still constructs `AccountState()` with its Phase-1
-defaults unless a caller explicitly wires a DB-backed one in. That's
-deliberate, not an oversight: "today's realized P&L" and "consecutive
-losses" only mean something once there's an actual persistent trading
-loop accumulating them across multiple trades in a day, which doesn't
-exist until Phase 11 (paper trading engine). Wiring the Risk Engine to
-silently read stale or empty DB state before that would be worse than
-the current explicit placeholder.
+`app/risk/service.py` (Phase 10) can now load real, DB-backed
+`AccountState` and `CapitalLedger`, build a ready-to-use `RiskEngine`
+from them, and record a closed trade's outcome across both atomically.
+`app/agent.py::build_paper_agent` accepts an optional `session` and will
+use it -- but **nothing calls it that way automatically**. Without an
+explicit `session`, `build_paper_agent()` still defaults to
+`AccountState()`'s Phase-1 placeholder, on purpose. That's deliberate,
+not an oversight: "today's realized P&L" and "consecutive losses" only
+mean something once there's an actual persistent trading loop
+accumulating them across multiple trades in a day, which doesn't exist
+until Phase 11 (paper trading engine). Wiring the Risk Engine to
+silently read stale or empty DB state before a real loop exists to keep
+it current would be worse than the current explicit placeholder.
+Phase 10 built the plumbing; Phase 11 is what's expected to actually
+turn the tap on.
 
 SQLite works against every model in `app/db/models.py` for local dev and
 tests (see `app/db/base.py`), but Postgres is the intended production
@@ -282,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 21 (defense in depth). Nothing to
+("Survival > profit") and section 22 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -359,7 +364,28 @@ other strategy. Building this is still future work (Phase 12 and 13
 haven't started); this entry exists so the scope is agreed *before*
 either phase is built, not decided under pressure while writing them.
 
-## 21. Everything here is defense in depth
+## 21. The Risk Engine is now DB-ready, still not DB-driven (Phase 10)
+
+`app/risk/service.py` closes the gap between the Phase-1 Risk Engine
+(pure logic), the Phase-5 database (schema with nothing reading/writing
+it automatically), and the Capital Ledger added after Phase 9 (also
+pure logic). It provides `load_account_state`, `load_or_initialize_ledger`,
+`build_risk_engine`, and — the one genuinely new operation —
+`record_trade_close`, which updates `AccountState.today_realized_pnl`
+and `consecutive_losses` *and* the `CapitalLedger`'s tradable/reserved
+split together, in one session, so a caller can never persist one
+without the other and leave them inconsistent.
+
+`consecutive_losses` increments on a loss, resets to 0 on a win, and is
+left unchanged on an exact breakeven (`realized_pnl == 0.0`) — a scratch
+trade neither extends nor breaks a losing streak. This is a judgment
+call, not something the owner specified; revisit it if it turns out to
+matter once real trades start closing at exactly zero.
+
+Still true after this phase: nothing calls any of this automatically.
+See section 15.
+
+## 22. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

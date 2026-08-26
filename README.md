@@ -3,7 +3,7 @@
 Autonomous, AI-assisted intraday trading system for FYERS API v3.
 Initial capital: ₹5,000. Survival > profit. See `docs/PRINCIPLES.md`.
 
-## Status: Phase 9 — Strategy Engine
+## Status: Phase 10 — Risk Engine (DB-wired)
 
 This repo is being built in the exact phase order specified by the owner's
 master prompt (Phase 1 → Phase 22). Nothing in this repo places live orders.
@@ -247,6 +247,30 @@ full-stack) against a throwaway local SQLite database the same way the
 initial schema was. `CapitalLedger` is not wired into a live loop yet —
 same status as `AccountState` (see the Phase 5 note above).
 
+This same update also adds a bootstrap script (`scripts/bootstrap_ec2.sh`,
+not itself part of the owner's numbered phases — tooling requested
+alongside continuing to Phase 10) — a single command to take a bare
+Linux instance to fully ready-to-run, covered in the Quick Start section
+below.
+
+Phase 10 adds `app/risk/service.py`: the missing glue between the
+Phase-1 Risk Engine, the Phase-5 database, and the Phase-9-plus Capital
+Ledger. `load_account_state` / `load_or_initialize_ledger` /
+`build_risk_engine` load real, DB-backed state instead of Phase-1's
+in-memory placeholders; `record_trade_close` is the one genuinely new
+operation — it updates `AccountState` (today's P&L, consecutive-loss
+streak) **and** `CapitalLedger` (the profit sweep) together, in one
+session, so the two can never drift out of sync. `app/agent.py::build_paper_agent`
+now accepts an optional `session` and uses it if given — additive, the
+existing no-DB default behavior is unchanged. 9 new tests for the
+service layer plus 2 more for the `build_paper_agent` wiring (223 total).
+
+**Still true after this phase: nothing calls any of this
+automatically.** "Today's realized P&L" only means something once
+there's an actual persistent loop accumulating it across trades in a
+day — that's still Phase 11's job. Phase 10 finished the plumbing;
+Phase 11 is expected to turn the tap on.
+
 ## What this environment can and can't do
 
 This codebase was generated in a sandboxed dev environment with **no live
@@ -273,9 +297,10 @@ network access** and **no FYERS credentials**. That means:
 6. **Technical analysis engine** ✅
 7. **Market regime detection** ✅
 8. **News/sentiment engine** ✅
-9. **Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)** ← you are here
-10. Risk engine ← skeleton included now, since it has veto power over every
-    later phase and everything else must be built to respect it
+9. **Strategy engine (trend/momentum/mean-reversion/breakout/VWAP/news)** ✅
+10. **Risk engine** ✅ ← you are here (skeleton was included back in Phase 1,
+    since it has veto power over every later phase; this phase wired it
+    to the database and capital ledger)
 11. Paper trading engine
 12. Backtesting engine
 13. AI decision engine (LLM layer, advisory only)
