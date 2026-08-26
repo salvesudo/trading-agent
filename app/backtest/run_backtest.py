@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 
 from app.analysis.indicators import InsufficientDataError
-from app.backtest.engine import run_backtest
+from app.backtest.engine import MAX_LOOKBACK_CANDLES, run_backtest
 from app.backtest.models import BacktestResult
 from app.broker.client import FyersClient
 from app.broker.models import BrokerError
@@ -76,6 +76,12 @@ def main() -> None:
     parser.add_argument("--to-date", required=True, help="yyyy-mm-dd")
     parser.add_argument("--equity", type=float, default=None, help="Starting capital (defaults to INITIAL_CAPITAL_INR)")
     parser.add_argument("--costs", type=float, default=15.0, help="Estimated per-trade costs, in rupees")
+    parser.add_argument(
+        "--max-lookback",
+        type=int,
+        default=MAX_LOOKBACK_CANDLES,
+        help="Trailing candles shown to regime/strategy detection each bar (bounded window, not full history)",
+    )
     args = parser.parse_args()
 
     try:
@@ -84,7 +90,17 @@ def main() -> None:
         candles = fetch_candles(client, args.symbol, timeframe, args.from_date, args.to_date)
         print(f"Fetched {len(candles)} candles for {args.symbol} ({args.from_date} to {args.to_date}).")
 
-        result = run_backtest(candles, args.symbol, initial_capital_inr=args.equity, estimated_costs=args.costs)
+        def _report_progress(done: int, total: int) -> None:
+            print(f"  ...processed {done}/{total} bars ({done / total * 100:.0f}%)", flush=True)
+
+        result = run_backtest(
+            candles,
+            args.symbol,
+            initial_capital_inr=args.equity,
+            estimated_costs=args.costs,
+            max_lookback_candles=args.max_lookback,
+            on_progress=_report_progress,
+        )
         _print_report(result)
     except (BrokerError, InsufficientDataError) as exc:
         print(f"\n❌ {exc}")

@@ -28,11 +28,27 @@ proud of; a result that leans on NEWS won't show up here at all.
 Single-symbol only: this drives one `symbol` through one candle series.
 A multi-symbol backtest would need synchronized candle feeds across
 symbols, which is future work, not this phase's scope.
+
+Bounded lookback, not full history, on every bar: earlier versions of
+this loop handed `candles[:i+1]` -- the *entire* history since bar 0 --
+to detect_regime()/generate_signals() on every single bar. Every
+indicator underneath (app/analysis/indicators.py) rebuilds a pandas
+DataFrame from scratch and recomputes over its whole input each call,
+and a couple of them (ADX, Supertrend) do that with a Python-level loop
+rather than a vectorized op. Doing that with an ever-growing window
+across thousands of bars is quadratic, not linear -- on a real multi-
+month 5-minute-candle backtest (thousands of bars) it made the CLI look
+hung when it was just doing an enormous, unnecessary amount of repeat
+work. MAX_LOOKBACK_CANDLES below caps the window each bar actually
+sees to its own trailing slice, which is also the more honest reading
+of what these modules already claim to do -- detect_regime's own
+docstring says "recent history" for its percentile ranking, not "all
+history since inception."
 """
 from __future__ import annotations
 
 import datetime as dt
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from app.analysis.indicators import InsufficientDataError
 from app.backtest.models import BacktestResult, StrategyStats
@@ -46,6 +62,15 @@ from app.risk.service import compute_next_account_state
 from app.strategy.candidate import to_trade_candidate
 from app.strategy.engine import Strategy, generate_signals, select_best_signal
 from app.strategy.models import StrategyContext
+
+# Comfortably above every indicator/strategy's own minimum (ADX needs
+# window*2=28, MACD needs 26, breakout needs LOOKBACK+1=21) while still
+# being a bounded, constant-size window -- see this module's docstring
+# for why an unbounded window was a real (quadratic) problem, not just a
+# style choice. 300 candles is ~4 trading days of 5-minute bars or well
+# over a year of daily bars; either way it's "recent history" for
+# regime/percentile purposes, not the entire backtest range.
+MAX_LOOKBACK_CANDLES = 300
 
 
 def _max_drawdown_pct(equity_curve: List[float]) -> float:
@@ -86,11 +111,17 @@ def run_backtest(
     initial_capital_inr: Optional[float] = None,
     protected_floor_inr: Optional[float] = None,
     estimated_costs: float = 15.0,
+    max_lookback_candles: int = MAX_LOOKBACK_CANDLES,
+    on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> BacktestResult:
     """Replay `candles` (ascending, one symbol) through the strategy
     engine and Risk Engine, simulating fills via PaperTradingEngine.
     Raises InsufficientDataError if there's nothing meaningful to
-    replay (fewer than 2 candles)."""
+    replay (fewer than 2 candles).
+
+    `on_progress(bars_done, total_bars)`, if given, is called
+    periodically -- purely cosmetic (e.g. so a CLI can print a progress
+    line on a long run), never affects the replay itself."""
     if len(candles) < 2:
         raise InsufficientDataError("Need at least 2 candles to run a backtest.")
 
@@ -107,8 +138,11 @@ def run_backtest(
         ledger = ledger.apply_trade_outcome(pnl)
         equity_curve.append(ledger.total_equity_inr)
 
+    total_bars = len(candles) - 1
     for i in range(1, len(candles)):
-        window = candles[: i + 1]
+        if on_progress is not None and (i % 500 == 0 or i == total_bars):
+            on_progress(i, total_bars)
+        window = candles[max(0, i + 1 - max_lookback_candles) : i + 1]
         current_candle = window[-1]
 
         closed = engine.process_price_update(symbol, current_candle.close, current_candle.timestamp)
