@@ -3,6 +3,7 @@ import datetime as dt
 import pytest
 
 from app.core.config import settings
+from app.data.models import Candle
 from app.paper.engine import PaperTradingEngine, PositionLimitError
 from app.paper.models import ExitReason, PaperPosition
 from app.risk.risk_engine import RiskDecision, RiskVerdict, TradeCandidate
@@ -146,6 +147,104 @@ def test_before_square_off_time_does_not_force_close():
 
     result = engine.process_price_update("RELIANCE", price=2510.0, current_time=_time(14, 0))
     assert result is None
+
+
+# --- process_candle: backtest-only, intrabar-aware exits ---
+
+def _candle(open_, high, low, close, ts=None):
+    return Candle(timestamp=ts or _time(10, 5), open=open_, high=high, low=low, close=close, volume=1000)
+
+
+def test_process_candle_buy_stop_hit_intrabar_exits_at_stop_not_close():
+    """The bar's close (2495) never crosses the stop -- only the low
+    (2478) does. process_price_update() would have missed this
+    entirely; process_candle() must not."""
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="BUY", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time())
+
+    closed = engine.process_candle("RELIANCE", _candle(open_=2496.0, high=2497.0, low=2478.0, close=2495.0))
+    assert closed is not None
+    assert closed.exit_reason == ExitReason.STOP_LOSS
+    assert closed.exit_price == 2480.0  # filled at the stop, no gap
+
+
+def test_process_candle_buy_stop_gap_fills_at_worse_open_not_stop():
+    """The bar opened below the stop (a gap down) -- a real stop order
+    can't fill better than the market gapped, so the fill is at the
+    open, not the nominal stop level."""
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="BUY", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time())
+
+    closed = engine.process_candle("RELIANCE", _candle(open_=2470.0, high=2472.0, low=2465.0, close=2468.0))
+    assert closed.exit_reason == ExitReason.STOP_LOSS
+    assert closed.exit_price == 2470.0  # the gapped-down open, worse than 2480
+
+
+def test_process_candle_buy_target_hit_intrabar_exits_at_target():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="BUY", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time())
+
+    closed = engine.process_candle("RELIANCE", _candle(open_=2540.0, high=2565.0, low=2538.0, close=2550.0))
+    assert closed.exit_reason == ExitReason.TARGET
+    assert closed.exit_price == 2560.0
+
+
+def test_process_candle_buy_target_gap_fills_at_better_open_not_target():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="BUY", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time())
+
+    closed = engine.process_candle("RELIANCE", _candle(open_=2570.0, high=2575.0, low=2568.0, close=2572.0))
+    assert closed.exit_reason == ExitReason.TARGET
+    assert closed.exit_price == 2570.0  # the gapped-up open, better than 2560
+
+
+def test_process_candle_both_stop_and_target_in_range_assumes_stop_first():
+    """A wide bar spanning both stop (2480) and target (2560) intraday
+    -- OHLC alone can't say which happened first, so the conservative
+    convention (stop first) applies. A win rate should never look
+    better than the data can actually support."""
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="BUY", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time())
+
+    closed = engine.process_candle("RELIANCE", _candle(open_=2500.0, high=2565.0, low=2475.0, close=2520.0))
+    assert closed.exit_reason == ExitReason.STOP_LOSS
+    assert closed.exit_price == 2480.0
+
+
+def test_process_candle_sell_stop_and_target_intrabar():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="SELL", entry=2500.0, stop=2520.0, target=2440.0), _approved_verdict(), _time())
+
+    stopped = engine.process_candle("RELIANCE", _candle(open_=2505.0, high=2525.0, low=2500.0, close=2510.0))
+    assert stopped.exit_reason == ExitReason.STOP_LOSS
+    assert stopped.exit_price == 2520.0
+
+
+def test_process_candle_within_range_keeps_position_open():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="BUY", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time())
+
+    result = engine.process_candle("RELIANCE", _candle(open_=2505.0, high=2515.0, low=2495.0, close=2510.0, ts=_time(11, 0)))
+    assert result is None
+    assert len(engine.open_positions) == 1
+
+
+def test_process_candle_square_off_uses_candle_close():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(side="BUY", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time(9, 30))
+
+    past_close = _time(int(settings.intraday_square_off_time.split(":")[0]), int(settings.intraday_square_off_time.split(":")[1]))
+    closed = engine.process_candle(
+        "RELIANCE", _candle(open_=2508.0, high=2512.0, low=2505.0, close=2510.0, ts=past_close)
+    )
+    assert closed is not None
+    assert closed.exit_reason == ExitReason.EOD_SQUARE_OFF
+    assert closed.exit_price == 2510.0
+
+
+def test_process_candle_no_open_position_returns_none():
+    engine = PaperTradingEngine()
+    assert engine.process_candle("RELIANCE", _candle(open_=2500.0, high=2510.0, low=2490.0, close=2500.0)) is None
 
 
 # --- manual close ---

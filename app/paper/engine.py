@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
+from app.data.models import Candle
 from app.paper.models import ExitReason, PaperPosition
 from app.risk.risk_engine import RiskDecision, RiskVerdict, TradeCandidate
 
@@ -116,6 +117,54 @@ class PaperTradingEngine:
             closed = position.close(price, ExitReason.TARGET, current_time)
         elif self._is_past_square_off(current_time):
             closed = position.close(price, ExitReason.EOD_SQUARE_OFF, current_time)
+        else:
+            return None
+
+        del self._open[symbol]
+        self.closed.append(closed)
+        return closed
+
+    def process_candle(self, symbol: str, candle: Candle) -> Optional[PaperPosition]:
+        """Backtest-only counterpart to process_price_update() above.
+        That method is tick-based (a single observed price) -- exactly
+        right for live/paper trading, which really does see one price
+        at a time. A historical OHLC bar is different: price can wick
+        through a stop or target intrabar and never show up in the
+        bar's close, which is all process_price_update() can see when
+        a backtest feeds it one bar at a time. Close-only checking was
+        found (2026-08-26, docs/PRINCIPLES.md section 24) to routinely
+        under-detect and understate stop-losses -- a position surviving
+        several bars where it had already breached its stop, then
+        exiting late and well past the nominal level once a bar's
+        close finally confirmed it.
+
+        Conservative, standard backtesting conventions used here:
+        - If the bar gapped past a level at the open (e.g. a BUY's stop
+          is 2480 but the bar opens at 2470), the fill is at the worse
+          open price -- a real stop order can't fill better than the
+          market gapped.
+        - If both stop AND target fall within the same bar's range,
+          there is no way to know from OHLC alone which was touched
+          first -- stop is assumed hit first (the conservative
+          convention), never target. A strategy's win rate should never
+          look better than the data can actually support.
+        """
+        position = self._open.get(symbol)
+        if position is None:
+            return None
+
+        is_buy = position.side == "BUY"
+        stop_hit = (candle.low <= position.stop_loss) if is_buy else (candle.high >= position.stop_loss)
+        target_hit = (candle.high >= position.target) if is_buy else (candle.low <= position.target)
+
+        if stop_hit:
+            exit_price = min(candle.open, position.stop_loss) if is_buy else max(candle.open, position.stop_loss)
+            closed = position.close(exit_price, ExitReason.STOP_LOSS, candle.timestamp)
+        elif target_hit:
+            exit_price = max(candle.open, position.target) if is_buy else min(candle.open, position.target)
+            closed = position.close(exit_price, ExitReason.TARGET, candle.timestamp)
+        elif self._is_past_square_off(candle.timestamp):
+            closed = position.close(candle.close, ExitReason.EOD_SQUARE_OFF, candle.timestamp)
         else:
             return None
 

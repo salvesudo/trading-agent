@@ -145,7 +145,7 @@ def run_backtest(
         window = candles[max(0, i + 1 - max_lookback_candles) : i + 1]
         current_candle = window[-1]
 
-        closed = engine.process_price_update(symbol, current_candle.close, current_candle.timestamp)
+        closed = engine.process_candle(symbol, current_candle)
         if closed is not None:
             _book_close(closed)
 

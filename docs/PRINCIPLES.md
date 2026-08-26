@@ -463,9 +463,9 @@ this project (sections 17, 19).
 ## 24. What the first real-data backtest run actually found (2026-08-26)
 
 Running `app/backtest/run_backtest.py` against real FYERS candles for
-the first time (NSE:RELIANCE-EQ, then NSE:INFY-EQ, both March-May 2025,
-5-minute bars) surfaced two real bugs that months of synthetic-data
-testing never would have -- both worth recording so nobody "fixes" them
+the first time (RELIANCE, INFY, ICICIBANK, TCS, all March-May 2025,
+5-minute bars) surfaced three real bugs that months of synthetic-data
+testing never would have -- all worth recording so nobody "fixes" them
 back in later without reading why.
 
 **1. Unbounded lookback was quadratic, not a hang.** The bar loop in
@@ -507,6 +507,26 @@ worth of `--costs` were actually counted -- the same trades, the same
 market data, a materially different conclusion. Treat every number from
 before this fix (there weren't any real-data ones yet) as gross, not
 net.
+
+**3. Close-only stop/target checking understated real stop-loss risk.**
+Looking at real TREND_FOLLOWING trades one by one (`--show-trades`,
+added for exactly this) surfaced a pattern: several stop-outs exited
+noticeably past the nominal stop distance (one nearly 2x the intended
+risk). The cause: `PaperTradingEngine.process_price_update()` is
+tick-based -- correct for live/paper trading, which really does see one
+price at a time -- but the backtest was feeding it one bar's *close*
+per candle. On 5-minute bars, price can wick through a stop or target
+intrabar and never show up in the close; the position survives bars it
+should have exited, and by the time a later close finally confirms the
+breach, price has often moved well past the original stop level. Fixed
+by adding `process_candle()`, a backtest-only method that checks the
+bar's full high/low range, with two standard, deliberately conservative
+conventions: a fill can never be better than a gapped-through open
+price, and if a single bar's range spans both stop and target (which
+OHLC data alone can't order), stop is assumed hit first -- a strategy's
+win rate should never look better than the data can actually support.
+`app/backtest/engine.py` now calls `process_candle()` instead of
+`process_price_update()`; nothing about live/paper trading changed.
 
 ## 25. Everything here is defense in depth
 
