@@ -37,16 +37,27 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 class PositionLimitError(RuntimeError):
-    """Raised when opening a position would breach MAX_CONCURRENT_POSITIONS
-    or duplicate an already-open symbol. An approved trade that can't
-    actually be opened is a real event a caller needs to see, not
-    something to swallow silently."""
+    """Raised when opening a position would breach MAX_CONCURRENT_POSITIONS,
+    duplicate an already-open symbol, land too close to square-off to
+    realistically reach a target (MIN_MINUTES_BEFORE_SQUARE_OFF_FOR_ENTRY),
+    or re-enter a symbol still inside its post-stop-loss cooldown
+    (POST_STOP_LOSS_COOLDOWN_MINUTES) -- see docs/PRINCIPLES.md section
+    24 for the real trades that motivated the latter two. An approved
+    trade that can't actually be opened is a real event a caller needs
+    to see, not something to swallow silently."""
 
 
 class PaperTradingEngine:
     def __init__(self) -> None:
         self._open: Dict[str, PaperPosition] = {}
         self.closed: List[PaperPosition] = []
+        # symbol -> closed_at of its most recent STOP_LOSS exit. Purely
+        # in-memory, like the rest of this engine's state -- does not
+        # survive a process restart (restore_position() only rebuilds
+        # currently-OPEN positions, not closed-trade history), so a
+        # cooldown in effect right before a restart won't carry over.
+        # Documented, not silently assumed away.
+        self._last_stop_loss_close: Dict[str, dt.datetime] = {}
 
     @property
     def open_positions(self) -> List[PaperPosition]:
@@ -73,6 +84,20 @@ class PaperTradingEngine:
             raise PositionLimitError(
                 f"MAX_CONCURRENT_POSITIONS ({settings.max_concurrent_positions}) reached."
             )
+        if self._too_close_to_square_off(opened_at):
+            raise PositionLimitError(
+                f"Too close to {settings.intraday_square_off_time} square-off "
+                f"(within {settings.min_minutes_before_square_off_for_entry} min) -- "
+                "not enough realistic runway left to reach a target before a forced exit."
+            )
+        last_stop = self._last_stop_loss_close.get(candidate.symbol)
+        if last_stop is not None:
+            cooldown_until = last_stop + dt.timedelta(minutes=settings.post_stop_loss_cooldown_minutes)
+            if opened_at < cooldown_until:
+                raise PositionLimitError(
+                    f"{candidate.symbol} stopped out at {last_stop.isoformat()} -- "
+                    f"post-stop-loss cooldown active until {cooldown_until.isoformat()}."
+                )
         position = PaperPosition(
             symbol=candidate.symbol,
             side=candidate.side,
@@ -92,6 +117,18 @@ class PaperTradingEngine:
         square_off = (int(hour_str), int(minute_str))
         local_time = current_time.astimezone(IST)
         return (local_time.hour, local_time.minute) >= square_off
+
+    def _too_close_to_square_off(self, current_time: dt.datetime) -> bool:
+        """True if `current_time` is within
+        MIN_MINUTES_BEFORE_SQUARE_OFF_FOR_ENTRY minutes of square-off --
+        or already past it, which naturally falls out of the same
+        minutes-remaining check (negative remaining minutes is always
+        less than a positive threshold)."""
+        hour_str, minute_str = settings.intraday_square_off_time.split(":")
+        square_off_minutes = int(hour_str) * 60 + int(minute_str)
+        local_time = current_time.astimezone(IST)
+        current_minutes = local_time.hour * 60 + local_time.minute
+        return (square_off_minutes - current_minutes) < settings.min_minutes_before_square_off_for_entry
 
     def process_price_update(
         self, symbol: str, price: float, current_time: dt.datetime
@@ -120,9 +157,7 @@ class PaperTradingEngine:
         else:
             return None
 
-        del self._open[symbol]
-        self.closed.append(closed)
-        return closed
+        return self._finish_close(symbol, closed)
 
     def process_candle(self, symbol: str, candle: Candle) -> Optional[PaperPosition]:
         """Backtest-only counterpart to process_price_update() above.
@@ -168,6 +203,16 @@ class PaperTradingEngine:
         else:
             return None
 
+        return self._finish_close(symbol, closed)
+
+    def _finish_close(self, symbol: str, closed: PaperPosition) -> PaperPosition:
+        """Shared tail for every exit path (stop/target/square-off via
+        either process_price_update or process_candle, plus manual
+        closes): remove from open, append to closed, and -- only for a
+        real STOP_LOSS -- record it for the post-stop-loss cooldown
+        check in open_position() above."""
+        if closed.exit_reason == ExitReason.STOP_LOSS:
+            self._last_stop_loss_close[symbol] = closed.closed_at
         del self._open[symbol]
         self.closed.append(closed)
         return closed
@@ -198,9 +243,7 @@ class PaperTradingEngine:
         if position is None:
             raise KeyError(f"No open position on {symbol}.")
         closed = position.close(price, ExitReason.MANUAL, current_time)
-        del self._open[symbol]
-        self.closed.append(closed)
-        return closed
+        return self._finish_close(symbol, closed)
 
 
 __all__ = ["PaperTradingEngine", "PositionLimitError"]

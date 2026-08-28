@@ -76,6 +76,24 @@ class Settings(BaseSettings):
     # 15:30 IST close, a common practical buffer against last-minute
     # liquidity/volatility, not a number FYERS or NSE requires.
     intraday_square_off_time: str = Field(default="15:15", alias="INTRADAY_SQUARE_OFF_TIME")
+    # Added 2026-08-28 after the first real-data backtests: a RELIANCE
+    # trend-following trade entered at 14:20 IST, 55 minutes before
+    # square-off, and got flattened at a loss with no realistic chance
+    # of reaching its target in that window. This blocks *new* entries
+    # too close to the forced-flat time -- existing open positions are
+    # unaffected, this only stops opening fresh ones with too little
+    # runway left. See docs/PRINCIPLES.md section 24.
+    min_minutes_before_square_off_for_entry: int = Field(
+        default=30, alias="MIN_MINUTES_BEFORE_SQUARE_OFF_FOR_ENTRY"
+    )
+    # Added the same day: a RELIANCE SELL got stopped out, and the very
+    # next signal immediately flipped to a BUY at the same price/moment
+    # -- which also lost. Blocks re-entering the *same symbol* for this
+    # long after it stops a position out, to avoid chasing a reversal
+    # right after getting proven wrong on it.
+    post_stop_loss_cooldown_minutes: int = Field(
+        default=30, alias="POST_STOP_LOSS_COOLDOWN_MINUTES"
+    )
 
     # --- Database ---
     database_url: str = Field(default="", alias="DATABASE_URL")
@@ -147,6 +165,13 @@ class Settings(BaseSettings):
                 f"INTRADAY_SQUARE_OFF_TIME={v!r} must be 24-hour 'HH:MM' (e.g. '15:15'). "
                 "Refusing to start."
             ) from None
+        return v
+
+    @field_validator("min_minutes_before_square_off_for_entry", "post_stop_loss_cooldown_minutes")
+    @classmethod
+    def _validate_non_negative_minutes(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"{v} must be >= 0 minutes. Refusing to start.")
         return v
 
     @model_validator(mode="after")

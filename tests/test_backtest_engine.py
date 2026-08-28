@@ -10,7 +10,12 @@ from app.paper.models import ExitReason
 
 def _candles(closes, ranges=None):
     ranges = ranges or [1.0] * len(closes)
-    start = datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc)
+    # 3:50 UTC = 9:20 IST -- just after NSE's 9:15 open, giving nearly a
+    # full trading day of runway before the 14:45 IST
+    # no-new-entries-near-square-off cutoff (settings.min_minutes_before_
+    # square_off_for_entry, added 2026-08-28). The old 9:00 UTC (14:30
+    # IST) start left almost no real runway once that guard existed.
+    start = datetime(2026, 1, 1, 3, 50, tzinfo=timezone.utc)
     return [
         Candle(timestamp=start + timedelta(minutes=i), open=c, high=c + r / 2, low=c - r / 2, close=c, volume=1000)
         for i, (c, r) in enumerate(zip(closes, ranges))
@@ -35,9 +40,14 @@ def test_flat_series_produces_no_trades_and_unchanged_equity():
 
 
 def test_sustained_uptrend_produces_mostly_winning_trend_following_trades():
-    # Verified numerically: a long, strong, steady uptrend repeatedly
-    # triggers TREND_FOLLOWING BUY signals as each position exits and a
-    # new one opens -- 80 trades, 79 wins, 1 loss on this exact series.
+    # Verified numerically (re-verified 2026-08-28 after the intrabar
+    # stop/target fix and TREND_FOLLOWING's REWARD_MULTIPLE change --
+    # see docs/PRINCIPLES.md section 24): a long, strong, steady uptrend
+    # repeatedly triggers TREND_FOLLOWING BUY signals as each position
+    # exits and a new one opens -- 31 trades, 31 wins, 0 losses on this
+    # exact series. Price never reverses, so a stop should never
+    # legitimately hit; the old numbers (80 trades, 1 loss) reflected
+    # the close-only detection bug this suite now avoids.
     prices = [100 + i * 1.5 for i in range(120)]
     result = run_backtest(_candles(prices), "TEST")
 
@@ -52,8 +62,9 @@ def test_sustained_uptrend_produces_mostly_winning_trend_following_trades():
 
 
 def test_uptrend_then_reversal_produces_a_losing_trade_and_positive_drawdown():
-    # Verified numerically: 14 trades, 11 wins, 3 losses, small positive
-    # drawdown once the reversal starts giving back gains.
+    # Verified numerically (re-verified 2026-08-28, see comment on the
+    # sustained-uptrend test above): 5 trades, 4 wins, 1 loss, small
+    # positive drawdown once the reversal starts giving back gains.
     prices = [100 + i * 1.5 for i in range(40)] + [100 + 39 * 1.5 - i * 3 for i in range(1, 15)]
     result = run_backtest(_candles(prices), "TEST")
 

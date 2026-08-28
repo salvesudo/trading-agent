@@ -75,6 +75,69 @@ def test_open_position_enforces_max_concurrent_positions():
         settings.max_concurrent_positions = original
 
 
+# --- entry guards: square-off timing, post-stop-loss cooldown ---
+
+def test_open_position_rejects_entry_too_close_to_square_off():
+    # Default square-off is 15:15 IST, default guard is 30 min before it.
+    engine = PaperTradingEngine()
+    with pytest.raises(PositionLimitError):
+        engine.open_position(_candidate(), _approved_verdict(), _time(14, 50))
+
+
+def test_open_position_allows_entry_comfortably_before_square_off():
+    engine = PaperTradingEngine()
+    position = engine.open_position(_candidate(), _approved_verdict(), _time(14, 44))
+    assert position.is_open
+
+
+def test_open_position_rejects_entry_after_square_off():
+    engine = PaperTradingEngine()
+    with pytest.raises(PositionLimitError):
+        engine.open_position(_candidate(), _approved_verdict(), _time(15, 30))
+
+
+def test_open_position_rejects_reentry_during_post_stop_loss_cooldown():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time(10, 0))
+    stopped = engine.process_price_update("RELIANCE", price=2475.0, current_time=_time(10, 5))
+    assert stopped.exit_reason == ExitReason.STOP_LOSS
+
+    # Default cooldown is 30 minutes -- 10 minutes later is still inside it.
+    with pytest.raises(PositionLimitError):
+        engine.open_position(_candidate(entry=2470.0), _approved_verdict(), _time(10, 15))
+
+
+def test_open_position_allows_reentry_after_cooldown_expires():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time(10, 0))
+    engine.process_price_update("RELIANCE", price=2475.0, current_time=_time(10, 5))
+
+    # 35 minutes later -- past the default 30-minute cooldown.
+    position = engine.open_position(_candidate(entry=2470.0), _approved_verdict(), _time(10, 40))
+    assert position.is_open
+
+
+def test_open_position_allows_reentry_after_target_hit_no_cooldown():
+    """The cooldown is specifically post-stop-loss -- a target hit
+    shouldn't block re-entry at all."""
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time(10, 0))
+    won = engine.process_price_update("RELIANCE", price=2565.0, current_time=_time(10, 5))
+    assert won.exit_reason == ExitReason.TARGET
+
+    position = engine.open_position(_candidate(entry=2565.0), _approved_verdict(), _time(10, 6))
+    assert position.is_open
+
+
+def test_open_position_allows_reentry_on_a_different_symbol_during_cooldown():
+    engine = PaperTradingEngine()
+    engine.open_position(_candidate(symbol="RELIANCE", entry=2500.0, stop=2480.0, target=2560.0), _approved_verdict(), _time(10, 0))
+    engine.process_price_update("RELIANCE", price=2475.0, current_time=_time(10, 5))
+
+    position = engine.open_position(_candidate(symbol="INFY"), _approved_verdict(), _time(10, 10))
+    assert position.is_open
+
+
 # --- exits: stop / target ---
 
 def test_buy_position_closes_on_stop_hit():

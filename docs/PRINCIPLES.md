@@ -287,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 25 (defense in depth). Nothing to
+("Survival > profit") and section 26 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -528,7 +528,60 @@ win rate should never look better than the data can actually support.
 `app/backtest/engine.py` now calls `process_candle()` instead of
 `process_price_update()`; nothing about live/paper trading changed.
 
-## 25. Everything here is defense in depth
+## 25. Fixing TREND_FOLLOWING on the evidence, not a guess (2026-08-28)
+
+Section 24 found bugs; this is different -- deliberate design changes
+to TREND_FOLLOWING, made because two independent clean backtest runs
+(post-lookback-fix and post-intrabar-fix, RELIANCE/INFY/ICICIBANK/TCS,
+March-May 2025) both showed it losing every single time it fired
+(0-for-10 combined). Three changes, each tied to a specific real trade,
+not a parameter sweep fit to this small sample:
+
+1. **No new entries within `MIN_MINUTES_BEFORE_SQUARE_OFF_FOR_ENTRY`
+   (default 30) minutes of square-off.** A RELIANCE trade entered at
+   14:20 IST, 55 minutes before the 15:15 square-off, and got flattened
+   at a loss with no realistic chance of reaching target. This is a
+   general portfolio-timing rule enforced in
+   `PaperTradingEngine.open_position()` -- it applies to every
+   strategy, not just TREND_FOLLOWING, same reasoning as
+   `MAX_CONCURRENT_POSITIONS`.
+2. **`POST_STOP_LOSS_COOLDOWN_MINUTES` (default 30).** A RELIANCE SELL
+   stopped out, and the very next signal immediately flipped to a BUY
+   at the same price/moment -- which also lost. `PaperTradingEngine`
+   now tracks each symbol's most recent stop-loss close and blocks a
+   new entry on that symbol until the cooldown passes. Also general,
+   not TREND_FOLLOWING-specific. Purely in-memory -- does not survive a
+   process restart, since `restore_position()` only rebuilds open
+   positions, not closed-trade history. A known limitation, not a
+   silent gap.
+3. **TREND_FOLLOWING's `REWARD_MULTIPLE`: 2.0 -> 1.5.** Not one trade
+   in the 0-for-10 sample ever reached target -- including a TCS trade
+   that held the full trading day (the maximum possible runway) and
+   still only covered ~24% of the distance to a 2x target. 1.5 still
+   has positive expectancy above a 40% win rate.
+
+**Deliberately not changed yet:** whether TREND_FOLLOWING's entry
+itself fires too late. It requires ADX-confirmed regime + price above
+EMA20 + Supertrend already flipped, all three at once -- three lagging
+confirmations stacked together can mean the easy part of a move is
+already over by the time all three agree. A tighter fix (e.g. trigger
+on a *fresh* Supertrend flip rather than a sustained aligned state)
+was considered and set aside for now: it risks colliding with the ADX
+regime gate (a fresh flip often precedes ADX crossing its own
+threshold) and redesigning it convincingly needs its own dedicated look
+rather than being bundled into this pass. Revisit once the three
+changes above have real-data results to look at.
+
+`app/backtest/engine.py`'s two synthetic-data tests
+(`test_sustained_uptrend_produces_mostly_winning_trend_following_trades`,
+`test_uptrend_then_reversal_produces_a_losing_trade_and_positive_drawdown`)
+were re-verified against the new code rather than assumed unaffected --
+their expected trade/win/loss counts changed (see the tests' own
+comments), and their synthetic candle start time moved from 14:30 IST
+to 9:20 IST so a 120-bar series doesn't run into the new square-off
+guard purely as a test-data artifact.
+
+## 26. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

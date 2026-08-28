@@ -36,7 +36,12 @@ def _approved(qty=5):
     return RiskVerdict(decision=RiskDecision.APPROVE, approved_quantity=qty, max_loss_inr=100.0, risk_pct=2.0, reason="ok")
 
 
-def _time(hour=9, minute=30):
+def _time(hour=4, minute=0):
+    # Default 4:00 UTC = 9:30 IST -- just after NSE's 9:15 open, safely
+    # before the 14:45 IST no-new-entries-near-square-off cutoff
+    # (settings.min_minutes_before_square_off_for_entry, added
+    # 2026-08-28). The old default (9:30 UTC = 15:00 IST) was inside
+    # that cutoff once it existed.
     return dt.datetime(2026, 1, 1, hour, minute, tzinfo=dt.timezone.utc)
 
 

@@ -170,7 +170,12 @@ def run_backtest(
         try:
             engine.open_position(candidate, verdict, current_candle.timestamp, strategy=best.strategy.value)
         except PositionLimitError:
-            continue  # shouldn't happen given the "already holding" check above; stay defensive anyway
+            # Duplicate-symbol/max-concurrent genuinely shouldn't happen
+            # given the "already holding" check above -- but this now
+            # also legitimately fires for the square-off-timing and
+            # post-stop-loss-cooldown guards (app/paper/engine.py),
+            # which are real, expected rejections, not defensive noise.
+            continue
 
     # Data ran out with a position still open -- force-close at the last
     # candle so every trade in the report is actually closed. A real,
