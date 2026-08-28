@@ -6,6 +6,7 @@ from app.analysis.indicators import InsufficientDataError
 from app.backtest.engine import run_backtest
 from app.data.models import Candle
 from app.paper.models import ExitReason
+from app.strategy import trend
 
 
 def _candles(closes, ranges=None):
@@ -40,16 +41,26 @@ def test_flat_series_produces_no_trades_and_unchanged_equity():
 
 
 def test_sustained_uptrend_produces_mostly_winning_trend_following_trades():
-    # Verified numerically (re-verified 2026-08-28 after the intrabar
-    # stop/target fix and TREND_FOLLOWING's REWARD_MULTIPLE change --
-    # see docs/PRINCIPLES.md section 24): a long, strong, steady uptrend
-    # repeatedly triggers TREND_FOLLOWING BUY signals as each position
-    # exits and a new one opens -- 31 trades, 31 wins, 0 losses on this
-    # exact series. Price never reverses, so a stop should never
-    # legitimately hit; the old numbers (80 trades, 1 loss) reflected
-    # the close-only detection bug this suite now avoids.
-    prices = [100 + i * 1.5 for i in range(120)]
-    result = run_backtest(_candles(prices), "TEST")
+    # Verified numerically (re-verified 2026-08-28 after
+    # MAX_BARS_SINCE_FLIP was added to trend.py -- see
+    # docs/PRINCIPLES.md section 25): a monotonic trend from bar 0 no
+    # longer works as this test's data on its own -- TREND_FOLLOWING's
+    # entry is now correctly stale for almost this entire series (see
+    # test_stale_trend_no_longer_generates_a_signal in
+    # tests/test_strategy_trend.py), and other strategies (BREAKOUT)
+    # would otherwise fire instead. A ranging warm-up (so detect_regime
+    # actually transitions into TRENDING_UP, landing the Supertrend
+    # flip close enough to stay "fresh") precedes the trend itself, and
+    # `strategies=[trend.generate]` isolates TREND_FOLLOWING the same
+    # way the old unbounded-window design used to produce for free --
+    # 3 trades, 3 wins, 0 losses on this exact series. Price never
+    # reverses, so a stop should never legitimately hit.
+    prices = [100.0]
+    for i in range(1, 30):
+        prices.append(100.0 + (1 if i % 2 == 0 else -1) * 0.8)
+    for _ in range(90):
+        prices.append(prices[-1] + 1.5)
+    result = run_backtest(_candles(prices), "TEST", strategies=[trend.generate])
 
     assert result.total_trades > 0
     assert result.wins > result.losses
@@ -85,9 +96,14 @@ def test_position_still_open_at_data_end_is_force_closed():
 
 
 def test_every_closed_trade_carries_strategy_attribution():
+    # Whichever strategy actually fires on this data isn't the point --
+    # this only checks that Phase 12's attribution field never comes
+    # back empty for a real trade, regardless of which of the six
+    # strategies produced it.
     prices = [100 + i * 1.5 for i in range(120)]
     result = run_backtest(_candles(prices), "TEST")
-    assert all(trade.strategy == "TREND_FOLLOWING" for trade in result.trades)
+    assert result.total_trades > 0
+    assert all(trade.strategy is not None for trade in result.trades)
 
 
 def test_custom_starting_capital_is_reflected_in_result():

@@ -560,17 +560,34 @@ not a parameter sweep fit to this small sample:
    still only covered ~24% of the distance to a 2x target. 1.5 still
    has positive expectancy above a 40% win rate.
 
-**Deliberately not changed yet:** whether TREND_FOLLOWING's entry
-itself fires too late. It requires ADX-confirmed regime + price above
-EMA20 + Supertrend already flipped, all three at once -- three lagging
-confirmations stacked together can mean the easy part of a move is
-already over by the time all three agree. A tighter fix (e.g. trigger
-on a *fresh* Supertrend flip rather than a sustained aligned state)
-was considered and set aside for now: it risks colliding with the ADX
-regime gate (a fresh flip often precedes ADX crossing its own
-threshold) and redesigning it convincingly needs its own dedicated look
-rather than being bundled into this pass. Revisit once the three
-changes above have real-data results to look at.
+**Update, same day:** the three changes above were re-tested on real
+data. Real improvement -- TREND_FOLLOWING's win rate across
+RELIANCE/INFY/ICICIBANK/TCS went from 0% to 35.3% -- but still net
+negative, because entries were still firing on *any* bar during an
+already-long-running trend, not just near where it started.
+
+**4. `MAX_BARS_SINCE_FLIP = 15`**, closing the entry-timing question
+above. `st.direction[-1] == 1` alone doesn't distinguish a fresh flip
+from one that happened 50 bars ago; three lagging confirmations (ADX
+crossing its regime threshold, price above EMA20, Supertrend already
+flipped) stacked together can mean the easy part of a move is over by
+the time all three agree. The fix bounds how stale the Supertrend flip
+may be -- Supertrend itself already IS a trend-start signal (it flips
+right when price crosses its band), the bug was accepting it long
+after the fact, not the indicator choice.
+
+The number took two attempts, not a guess: an initial 5-bar window was
+tested against synthetic breakouts of several speeds (weak/moderate/
+strong) following a ranging warm-up, and rejected -- ADX(14)
+consistently took 8-10 bars *after* the Supertrend flip to itself
+cross the regime's 25 threshold, regardless of how fast the move was,
+which made 5 bars structurally unable to ever fire (by the time the
+regime gate opened, the flip was already always past it). 15 leaves
+real margin above that observed lag while still being far tighter than
+the unbounded staleness this replaces. This is exactly the "risks
+colliding with the ADX regime gate" concern flagged above when this
+was deferred -- it was real, and the fix was to measure the actual lag
+rather than guess a tight number.
 
 `app/backtest/engine.py`'s two synthetic-data tests
 (`test_sustained_uptrend_produces_mostly_winning_trend_following_trades`,
@@ -579,7 +596,14 @@ were re-verified against the new code rather than assumed unaffected --
 their expected trade/win/loss counts changed (see the tests' own
 comments), and their synthetic candle start time moved from 14:30 IST
 to 9:20 IST so a 120-bar series doesn't run into the new square-off
-guard purely as a test-data artifact.
+guard purely as a test-data artifact. The sustained-uptrend test's
+price series itself also changed, from a monotonic climb starting at
+bar 0 to a ranging warm-up followed by a breakout -- a monotonic
+series flips Supertrend once near bar 1 and never again, which is now
+correctly rejected as stale for almost the entire series (see
+`test_stale_trend_no_longer_generates_a_signal`,
+tests/test_strategy_trend.py) rather than generating dozens of
+trades the way it artificially did before this fix existed.
 
 ## 26. Everything here is defense in depth
 
