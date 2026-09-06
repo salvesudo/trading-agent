@@ -287,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 28 (defense in depth). Nothing to
+("Survival > profit") and section 29 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -693,7 +693,65 @@ bar sees regardless of how many total bars the run covers, so a
 12-month run costs proportionally more than a 3-month one, not
 quadratically more.
 
-## 28. Everything here is defense in depth
+## 28. Paper trading, continuously, instead of more backtesting or Phase 13 (2026-09-06)
+
+By this point: 116+ trades tested across two time windows (3 months,
+12 months), 8 symbols, real intrabar execution, real FYERS costs, and
+three rounds of evidence-driven fixes -- and no strategy showed
+validated, reproducible edge. Two candidates that briefly looked
+promising (MOMENTUM, then MEAN_REVERSION) both turned out to be
+illusions under closer inspection (sections 26 and this section's own
+MEAN_REVERSION finding below). Rather than a fourth round of parameter
+tuning, or building Phase 13's AI advisory layer on strategies that
+haven't cleared the bar that phase was explicitly scoped to require
+(section 20.6: "never trusted without Phase 12 backtesting first"),
+the better use of the time was making the agent actually *run*.
+
+**The MEAN_REVERSION illusion, for the record:** the 12-month backtest
+showed it at 87.5% win rate (7 of 8 trades) -- the best result seen
+anywhere in this project. Investigating before trusting it (the same
+scrutiny TREND_FOLLOWING got) found all 8 trades landed on exactly 4
+calendar days -- the *very first* days of the whole 12-month window,
+across three unrelated stocks, and then never fired again for the
+remaining ~360 days. That maps almost exactly onto
+`MAX_LOOKBACK_CANDLES=300` (~4 trading days): before the lookback
+window fills to its full size, `detect_regime()`'s ADX/percentile
+classification runs on an abnormally small, unstable sample, which
+appears to bias toward "RANGING" -- MEAN_REVERSION's only entry gate --
+far more than it would in steady state. Once the window reaches full
+size, the gate essentially never reopens. Not a real edge; a
+measurement artifact of the backtest's own warm-up period. (This
+doesn't affect the live loop below the same way, since it always
+fetches a real trailing window well over 300 candles from the first
+cycle onward -- there is no analogous "day zero" the way a fresh
+backtest has one. A `warmup_bars` exclusion for future backtests is
+still a good idea and remains open work.)
+
+**Built: `app/orchestrator/paper_trading_loop.py`.** Ties market data,
+live news, regime detection, the strategy engine, real cost estimation,
+the Risk Engine, and the paper trading engine into a loop that
+actually watches symbols and makes (paper) decisions on a schedule --
+the one thing every phase since 2 has been a tested piece of, with
+nothing running them together. Per cycle, per symbol: fetch a real
+trailing candle window, check any open position for an exit
+(`process_price_update` -- tick-based, the same method live/paper
+trading always used, never `process_candle`, which stays backtest-only
+per section 24), and if flat, evaluate a fresh signal through the same
+production Risk Engine path everything else in this project uses.
+`STOP_TRADING` is re-read fresh from the environment every cycle
+(a fresh `Settings()`, not the long-lived imported singleton) so an
+`.env` edit takes effect on the very next cycle without restarting the
+process -- otherwise the kill switch would only work at the next
+deliberate restart, which defeats its purpose for a long-running
+daemon. Refuses to start outside `TRADING_MODE=PAPER`, same guarantee
+as everywhere else.
+
+This is explicitly not a claim that the strategies now have edge --
+they still don't have validated edge, and paper trading forward is
+itself the honest next test of that, not a workaround for having
+skipped it. Zero real capital is at risk either way.
+
+## 29. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),
