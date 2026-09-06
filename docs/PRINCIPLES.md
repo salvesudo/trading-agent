@@ -287,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 26 (defense in depth). Nothing to
+("Survival > profit") and section 27 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -605,7 +605,63 @@ correctly rejected as stale for almost the entire series (see
 tests/test_strategy_trend.py) rather than generating dozens of
 trades the way it artificially did before this fix existed.
 
-## 26. Everything here is defense in depth
+## 26. A flat cost guess was deciding the whole verdict (2026-09-06)
+
+By this point, seven real symbols had been backtested across three
+rounds of fixes (sections 24-25): RELIANCE, INFY, ICICIBANK, TCS,
+HDFCBANK, SBIN, ITC. Pooling all of them together -- 65 trades, every
+strategy, every fix applied -- gave a sobering number: **net P&L of
+-₹832.77**, and every single symbol individually negative. MOMENTUM in
+particular had looked like a real, validated signal after 4 symbols
+(68.4% win rate, +₹137.29) and then went 0-for-6 on the next 3 -- a
+clean, concrete demonstration of exactly the caution this document
+repeats everywhere (sections 17, 19, 23): a good-looking sample is not
+proof of edge.
+
+But pooling the same 65 trades' own printed "total estimated costs"
+figures gave a second number that mattered more: **₹975.00 in assumed
+costs**, meaning **gross P&L (before costs) was +₹142.23** -- slightly
+*profitable*. The flat `--costs 15.0` guess every backtest before this
+had used was the single variable deciding whether the pooled result
+read as a marginal profit or a real loss.
+
+That number was never verified against what FYERS actually charges.
+Checked against FYERS' own published Standard-plan fee schedule
+(confirmed as this account's actual plan, not assumed) --
+[pricing](https://fyers.in/pricing),
+[charges list](https://fyers.in/charges-list),
+[statutory charges](https://support.fyers.in/portal/en/kb/articles/what-are-the-statutory-charges-on-trades-at-fyers-stt-gst-sebi-turnover-fee-ipft-etc) --
+a flat ₹15 turns out to be a poor approximation in *both* directions
+for the position sizes this system actually trades (1% risk on
+~₹5,000 means most positions are 1-15 shares, ~₹1,000-15,000
+notional): it overstates cost on the smallest trades (a 1-share,
+~₹1,200 trade's real round-trip cost is under ₹2 -- the 0.03%
+brokerage rate almost never even reaches the ₹20/order cap at this
+notional) and understates it on the largest ones.
+
+**Fixed:** `app/broker/costs.py` -- `round_trip_cost()` computes the
+real fee stack (brokerage capped at ₹20/order Standard or ₹15/order
+Prime, whichever the account's actual plan is + STT on the sell leg +
+NSE exchange charges both legs + 18% GST on brokerage/exchange only +
+SEBI turnover fee + stamp duty on the buy leg), and
+`estimate_intraday_costs()` wraps it for the one place a cost estimate
+is actually needed *before* the Risk Engine has sized the trade
+(approximating quantity the same way the Risk Engine's own raw sizing
+formula does, before its cost-aware refinement loop -- a reasonable
+upfront estimate, not a different one). `app/backtest/engine.py`'s
+`estimated_costs` parameter now defaults to `None`, meaning "estimate
+each trade's own real cost" instead of a flat number; passing an
+explicit float still forces the old flat-cost behavior for a quick
+sensitivity check. `FYERS_PRIME_SUBSCRIPTION` (default `false`,
+confirmed as correct for this account 2026-09-06) controls which
+brokerage cap applies -- do not flip it without the owner confirming
+they've actually subscribed to Prime.
+
+Every real-data number printed before this commit was gross of a
+guessed cost, not the honest figure -- re-run before trusting anything
+prior to this section against real capital.
+
+## 27. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),

@@ -58,7 +58,7 @@ def _print_trade_log(result: BacktestResult, strategy_filter: str | None) -> Non
     print("=" * 60)
 
 
-def _print_report(result: BacktestResult) -> None:
+def _print_report(result: BacktestResult, forced_flat_costs: float | None) -> None:
     print("=" * 60)
     print(f"BACKTEST REPORT: {result.symbol}")
     print(f"{result.start} -> {result.end}")
@@ -87,9 +87,19 @@ def _print_report(result: BacktestResult) -> None:
             f"win_rate={stats.win_rate_pct:5.1f}%  pnl=₹{stats.total_pnl_inr:,.2f} (net)"
         )
     print("=" * 60)
-    print("All P&L above is net of estimated per-trade costs (--costs, "
-          f"₹{result.total_estimated_costs_inr:,.2f} total across {result.total_trades} trades here) -- "
-          "not just a display adjustment, this is what actually posts to the ledger now.")
+    if forced_flat_costs is not None:
+        print(
+            f"All P&L above is net of a FORCED FLAT cost of ₹{forced_flat_costs:,.2f}/trade (--costs override, "
+            f"₹{result.total_estimated_costs_inr:,.2f} total across {result.total_trades} trades here) -- "
+            "not the real per-trade FYERS fee estimate (app/broker/costs.py). Omit --costs for that."
+        )
+    else:
+        print(
+            "All P&L above is net of each trade's own estimated real FYERS cost (app/broker/costs.py: "
+            f"brokerage/STT/exchange/GST/stamp duty, ₹{result.total_estimated_costs_inr:,.2f} total across "
+            f"{result.total_trades} trades here) -- not just a display adjustment, this is what actually "
+            "posts to the ledger now."
+        )
     print("None of this has been backtested/calibrated before now -- see")
     print("docs/PRINCIPLES.md sections 17, 19, 22. A backtest result is a")
     print("starting point for judgment, not proof of a working strategy.")
@@ -109,7 +119,13 @@ def main() -> None:
     parser.add_argument("--from-date", required=True, help="yyyy-mm-dd")
     parser.add_argument("--to-date", required=True, help="yyyy-mm-dd")
     parser.add_argument("--equity", type=float, default=None, help="Starting capital (defaults to INITIAL_CAPITAL_INR)")
-    parser.add_argument("--costs", type=float, default=15.0, help="Estimated per-trade costs, in rupees")
+    parser.add_argument(
+        "--costs",
+        type=float,
+        default=None,
+        help="Force a flat per-trade cost in rupees instead of estimating each trade's real FYERS fee "
+        "(brokerage/STT/exchange/GST/stamp duty, app/broker/costs.py) -- leave unset for the real estimate",
+    )
     parser.add_argument(
         "--max-lookback",
         type=int,
@@ -144,7 +160,7 @@ def main() -> None:
             max_lookback_candles=args.max_lookback,
             on_progress=_report_progress,
         )
-        _print_report(result)
+        _print_report(result, forced_flat_costs=args.costs)
         if args.show_trades is not None:
             strategy_filter = None if args.show_trades == "ALL" else args.show_trades
             _print_trade_log(result, strategy_filter)

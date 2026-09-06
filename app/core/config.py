@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     fyers_redirect_uri: str = Field(default="", alias="FYERS_REDIRECT_URI")
     fyers_static_ip: str = Field(default="", alias="FYERS_STATIC_IP")
     fyers_access_token: str = Field(default="", alias="FYERS_ACCESS_TOKEN")
+    # Changes which brokerage cap app/broker/costs.py uses (₹20/order
+    # Standard vs ₹15/order Prime) -- confirmed with the owner as
+    # Standard on 2026-09-06, do not flip this without them confirming
+    # they've actually subscribed to Prime.
+    fyers_prime_subscription: bool = Field(default=False, alias="FYERS_PRIME_SUBSCRIPTION")
 
     # --- Compliance (Phase 3: spec section 3) ---
     # Whether the FYERS app/account has been confirmed (by the owner, with

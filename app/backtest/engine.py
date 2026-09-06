@@ -52,6 +52,7 @@ from typing import Callable, List, Optional
 
 from app.analysis.indicators import InsufficientDataError
 from app.backtest.models import BacktestResult, StrategyStats
+from app.broker.costs import estimate_intraday_costs
 from app.data.models import Candle
 from app.paper.engine import PaperTradingEngine, PositionLimitError
 from app.paper.models import PaperPosition
@@ -110,7 +111,7 @@ def run_backtest(
     strategies: Optional[List[Strategy]] = None,
     initial_capital_inr: Optional[float] = None,
     protected_floor_inr: Optional[float] = None,
-    estimated_costs: float = 15.0,
+    estimated_costs: Optional[float] = None,
     max_lookback_candles: int = MAX_LOOKBACK_CANDLES,
     on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> BacktestResult:
@@ -118,6 +119,18 @@ def run_backtest(
     engine and Risk Engine, simulating fills via PaperTradingEngine.
     Raises InsufficientDataError if there's nothing meaningful to
     replay (fewer than 2 candles).
+
+    `estimated_costs`: leave as None (the default) to estimate each
+    trade's own real cost via app.broker.costs.estimate_intraday_costs
+    (FYERS' actual fee schedule, sized off that specific candidate's
+    entry/stop and the account's equity at the time) -- added
+    2026-09-06 after pooling every real-data backtest run so far showed
+    net P&L of -₹832.77 against a *gross* (pre-flat-cost) P&L of
+    +₹142.23: the flat ₹15/trade guess this replaced was overstating
+    cost on small trades and understating it on large ones, and was
+    itself the deciding factor between "profit" and "loss" in that
+    pooled result. Pass an explicit float only to force a flat
+    per-trade cost instead (e.g. for a quick sensitivity check).
 
     `on_progress(bars_done, total_bars)`, if given, is called
     periodically -- purely cosmetic (e.g. so a CLI can print a progress
@@ -162,7 +175,14 @@ def run_backtest(
         if best is None:
             continue
 
-        candidate = to_trade_candidate(best, account_equity=ledger.tradable_capital_inr, estimated_costs=estimated_costs)
+        trade_costs = (
+            estimated_costs
+            if estimated_costs is not None
+            else estimate_intraday_costs(
+                entry_price=best.entry_price, stop_loss=best.stop_loss, account_equity=ledger.tradable_capital_inr
+            )
+        )
+        candidate = to_trade_candidate(best, account_equity=ledger.tradable_capital_inr, estimated_costs=trade_costs)
         verdict = RiskEngine(account_state).evaluate(candidate)
         if verdict.decision != RiskDecision.APPROVE:
             continue
