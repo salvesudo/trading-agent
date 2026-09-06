@@ -287,7 +287,7 @@ the design, not new work: `MAX_RISK_PER_TRADE_PCT` (1%, hard-capped in
 `app/core/config.py`), `MAX_DAILY_LOSS_PCT` (2%, also hard-capped), the
 5-consecutive-loss hard halt, and the `STOP_TRADING` kill switch
 together are what this principle *is*, mechanically. See section 0
-("Survival > profit") and section 27 (defense in depth). Nothing to
+("Survival > profit") and section 28 (defense in depth). Nothing to
 build; a reason to never loosen any of the above without the owner
 explicitly asking.
 
@@ -661,7 +661,39 @@ Every real-data number printed before this commit was gross of a
 guessed cost, not the honest figure -- re-run before trusting anything
 prior to this section against real capital.
 
-## 27. Everything here is defense in depth
+## 27. Backtest history is chunked now, not capped at ~100 days (2026-09-06)
+
+After section 26's fixes, the pooled real-data picture across 8 liquid
+NSE stocks (RELIANCE, INFY, ICICIBANK, TCS, HDFCBANK, SBIN, ITC, LT --
+70 trades, March-June 2025) was still net negative (-₹961.42, gross
++₹126.78) with no strategy showing a validated edge. Rather than
+another round of parameter tuning, the next question was whether that
+specific 3-month window was just a broadly tough/choppy period for
+everything, rather than the strategies being unfixable -- answerable
+only with a longer window.
+
+`fetch_candles()` had never been tested past ~100 days because nobody
+had asked for more yet, and FYERS actually caps how much range a
+single history() request can cover: **100 days for intraday
+resolutions, 366 days for daily** -- confirmed against FYERS' own docs
+(https://support.fyers.in/portal/en/kb/fyers-api-integrations/fyers-api/api-v3/data-api),
+not assumed. Requesting 6-12 months of 5-minute data in one call would
+have hit that cap. `app/data/history.py` now splits any wider range
+into consecutive, non-overlapping chunks automatically and stitches
+the results into one ascending, deduplicated candle list -- callers
+(`app/backtest/run_backtest.py`, `app/data/service.py::seed_history`)
+need no changes, this is transparent. Only implemented for
+`date_format=1` ('yyyy-mm-dd' strings, the only form anything in this
+codebase actually uses) -- `date_format=0` (epoch seconds) bypasses
+chunking entirely rather than guessing at unbuilt date arithmetic.
+
+A longer backtest is still bounded, linear work, not a new performance
+risk: `MAX_LOOKBACK_CANDLES` (section 24) already caps the window each
+bar sees regardless of how many total bars the run covers, so a
+12-month run costs proportionally more than a 3-month one, not
+quadratically more.
+
+## 28. Everything here is defense in depth
 
 Notice the repeated pattern: a limit enforced by a `pydantic` validator
 at config load time (5% risk-per-trade in `.env` will refuse to boot),
